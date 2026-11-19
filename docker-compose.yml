@@ -1,0 +1,113 @@
+# 证照到期管理系统 —— 飞牛 fnOS 部署编排
+#
+# 特点：
+#   - 独立 MySQL 8 容器 + 独立数据库（默认 cert_agent_fnos），不与其他系统共用
+#   - 独立 Redis 7 容器；Redis 为强依赖，不可降级为文件缓存
+#   - 应用为单容器（nginx + php-fpm + scheduler），构建时把代码打进镜像
+#   - 仅暴露 HTTP 端口；MySQL / Redis 只在容器网络内可达
+#
+# 使用前：cp .env.example .env 并填写所有必填项。
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?请在 .env 中设置 DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME:-cert_agent_fnos}
+      # 允许应用容器以 root 连接；数据库端口不对宿主机暴露
+      MYSQL_ROOT_HOST: "%"
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["sh", "-ec", 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?请在 .env 中设置 REDIS_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -qx PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cert-expiry-manager-fnos:${APP_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    environment:
+      TZ: Asia/Shanghai
+      FNOS_DB_HOST: mysql
+      FNOS_DB_PORT: "3306"
+      FNOS_DB_NAME: ${DB_NAME:-cert_agent_fnos}
+      FNOS_DB_USER: root
+      FNOS_DB_PASS: ${DB_ROOT_PASSWORD:?请在 .env 中设置 DB_ROOT_PASSWORD}
+      FNOS_REDIS_HOST: redis
+      FNOS_REDIS_PORT: "6379"
+      FNOS_REDIS_PASSWORD: ${REDIS_PASSWORD:?请在 .env 中设置 REDIS_PASSWORD}
+      FNOS_REDIS_DB: ${REDIS_DB:-0}
+      FNOS_REDIS_PREFIX: ${REDIS_PREFIX:-cert:fnos:}
+      FNOS_ADMIN_USER: ${ADMIN_USER:-admin}
+      FNOS_ADMIN_PASS: ${ADMIN_PASS:?请在 .env 中设置 ADMIN_PASS}
+      FNOS_ADMIN_NAME: ${ADMIN_NAME:-系统管理员}
+      # 政务网申报密码加密密钥，安装后不可更换（更换会导致已保存密码无法解密）
+      PHP_GOV_PASSWORD_KEY: ${GOV_PASSWORD_KEY:?请在 .env 中设置 GOV_PASSWORD_KEY}
+    volumes:
+      # 配置（.env）与安装锁在容器重建后保留
+      - ./data/config:/data/config
+      # 运行日志、备份、在线升级工作区、授权文件（runtime/vault）
+      - ./data/runtime:/var/www/backend/runtime
+      # 上传附件
+      - ./data/uploads:/var/www/backend/public/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "/usr/local/bin/fnos-healthcheck.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+volumes:
+  mysql_data:
+  redis_data:

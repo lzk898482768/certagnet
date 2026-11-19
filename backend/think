@@ -1,0 +1,12 @@
+<?php
+namespace think;
+
+// 定义应用目录
+define('APP_PATH', __DIR__ . '/app/');
+
+// 加载 Composer 自动加载（ThinkPHP 6.1 通过 autoload 引导，无需 thinkphp/base.php）
+require __DIR__ . '/vendor/autoload.php';
+
+// 启动命令行应用
+$app = new App();
+$app->console->run();

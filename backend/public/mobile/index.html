@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <link rel="stylesheet" href="./assets/uni.ee21c42b.css">
+
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>证照到期管理</title>
+    <script>
+    /*
+     * v2.80.1：企业微信 OAuth 回调最早引导（必须早于 uni-app / vue-router 执行）。
+     * 后端 302 回到 /mobile/?totp_challenge=xxx（或 code/token/wecom_error）。
+     * 实测 uni-h5 首屏遇到「无 hash 的 search 直链」会先挂载一次登录页、再把地址
+     * 规范化为 hash 路由并重建（部分企微 webview 经 open.weixin.qq.com 外域往返后
+     * 甚至会整页重载、清空会话存储）。若等到登录组件里再读参数，首个实例 await 期间
+     * 被卸载 / 重载后地址栏参数已被清掉，二次验证面板拿不到 challenge，表现为
+     * 「企微一键登录在需要二次验证时停在登录页、无法登录」。
+     * 这里在任何框架脚本运行前，同步把 search 上的回调参数搬进规范 hash 路由，
+     * 既消除二次挂载，也保证即便整页重载，challenge 仍随 hash 保留在地址栏。
+     */
+    (function () {
+      try {
+        var KEYS = ['code', 'state', 'token', 'wecom_error', 'totp_challenge'];
+        var search = window.location.search || '';
+        if (search.indexOf('=') < 0) return;
+        var sp = new URLSearchParams(search.slice(1));
+        var has = false;
+        for (var i = 0; i < KEYS.length; i++) {
+          if (sp.get(KEYS[i]) != null) { has = true; break; }
+        }
+        if (!has) return;
+        var hash = window.location.hash || '';
+        var qIndex = hash.indexOf('?');
+        var route = qIndex >= 0 ? hash.slice(0, qIndex) : hash;
+        var hp = qIndex >= 0 ? new URLSearchParams(hash.slice(qIndex + 1)) : new URLSearchParams();
+        for (var j = 0; j < KEYS.length; j++) {
+          var v = sp.get(KEYS[j]);
+          if (v != null && !hp.get(KEYS[j])) hp.set(KEYS[j], v);
+        }
+        if (!route || route === '#' || route === '#/') route = '#/pages/login/login';
+        var qs = hp.toString();
+        var target = window.location.pathname + route + (qs ? '?' + qs : '');
+        window.history.replaceState(window.history.state || {}, '', target);
+      } catch (e) { /* 引导失败不阻断主流程，登录组件内还有存储/URL 多重兜底 */ }
+    })();
+    </script>
+    <!--preload-links-->
+    <!--app-context-->
+    <script type="module" crossorigin src="./assets/index-BFvX8gx-.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-hKYTXzBT.css">
+  </head>
+  <body>
+    <div id="app"></div>
+  </body>
+</html>

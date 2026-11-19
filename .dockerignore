@@ -1,0 +1,26 @@
+# 依赖与构建产物随仓库分发，仅忽略本机环境与运行时数据
+.env
+/data/
+
+# Docker 构建上下文之外的文件
+.git/
+.gitignore
+.vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
+
+# 运行时状态（镜像内会重新创建空目录）
+backend/runtime/*
+!backend/runtime/.gitkeep
+!backend/runtime/*/.gitkeep
+backend/public/uploads/*
+!backend/public/uploads/.gitkeep
+
+# 本机安装状态 / 环境配置
+backend/.env
+backend/runtime/install.lock
+backend/runtime/vault/
+backend/runtime/cert_last_run.json
+backend/runtime/gov_last_run.json

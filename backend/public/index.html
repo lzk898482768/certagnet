@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>证照到期管理系统</title>
+  <script>
+    // 站点根路径分流：PC/企业微信(PC) → /web/ ；手机/平板/企微(移动) → /mobile/
+    // 说明：部分服务器 DirectoryIndex 优先 index.html，此时由本页兜底做跳转；
+    //       若由 ThinkPHP 入口处理，则由 route/app.php 的根路由同样完成分流。
+    // ★ 判断规则必须与 backend/route/app.php 的 $clientHome 保持一致，两处同步修改！
+    //   规则：① 先判桌面 UA（PC 微信/企微内置浏览器 UA 同样含 MicroMessenger，须先排除）
+    //        ② 再判移动特征
+    //        ③ iPadOS 13+ 默认报桌面 UA（Macintosh），仅 JS 能用 maxTouchPoints 识别，PHP 无能为力
+    (function () {
+      try {
+        var ua = navigator.userAgent || '';
+        var isDesktop = /Windows NT|WindowsWechat|Macintosh/i.test(ua);
+        var isMobile = /Mobile|Android|iPhone|iPad|iPod|HarmonyOS|MicroMessenger|Windows Phone/i.test(ua);
+        // Macintosh 桌面 UA + 多点触控 → 实为 iPad，归入移动端
+        var iPadLike = /Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1;
+        var toMobile = (isMobile && !isDesktop) || iPadLike;
+        location.replace(toMobile ? '/mobile/' : '/web/');
+      } catch (e) {
+        location.replace('/web/');
+      }
+    })();
+  </script>
+  <!-- 无 JS 时无法做 UA 判断，默认进 PC 端；下方手动链接供移动端用户自行选择 -->
+  <noscript><meta http-equiv="refresh" content="0;url=/web/"></noscript>
+</head>
+<body>
+  <div style="font:14px/1.8 -apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#666;text-align:center;padding:80px 20px">
+    正在进入系统…
+    <div style="margin-top:12px">
+      <a href="/web/" style="color:#409eff;text-decoration:none">进入 PC 端</a>
+      <span style="color:#c0c4cc">·</span>
+      <a href="/mobile/" style="color:#409eff;text-decoration:none">进入移动端</a>
+    </div>
+  </div>
+</body>
+</html>

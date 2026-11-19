@@ -1,0 +1,23 @@
+# vendor 目录与 composer.lock 随仓库分发（生产环境免 composer install）。
+# 运行时生成内容仍不提交，仅保留目录占位（.gitkeep）。
+/runtime/log/*
+/runtime/cache/*
+/runtime/temp/*
+/runtime/export/*
+/runtime/upload/*
+!/runtime/log/.gitkeep
+!/runtime/cache/.gitkeep
+!/runtime/temp/.gitkeep
+!/runtime/export/.gitkeep
+!/runtime/upload/.gitkeep
+
+# 授权运行时目录（公钥/凭证/安装态/影子日志均为现场状态，不随仓库分发）
+/runtime/vault/
+
+/public/uploads/*
+!/public/uploads/.gitkeep
+
+.env
+.idea/
+.vscode/
+.DS_Store
