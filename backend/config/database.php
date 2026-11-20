@@ -15,7 +15,8 @@ return [
             'charset'     => env('database.charset', 'utf8mb4'),
             'prefix'      => env('database.prefix', ''),
             'params'      => [],
-            'debug'       => true,
+            // 生产默认关闭 SQL 调试日志，减少每条请求的日志 IO；排查时可在 .env 设 [DATABASE] DEBUG=true
+            'debug'       => (bool)env('database.debug', false),
             'deploy'      => 0,
             'rw_separate' => false,
             'master_num'  => 1,

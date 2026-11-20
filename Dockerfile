@@ -54,9 +54,10 @@ COPY docker/opcache.ini /usr/local/etc/php/conf.d/zz-opcache.ini
 # php-fpm：保留容器环境变量（GOV 加密密钥等通过 PHP_* 注入）
 COPY docker/php-fpm.conf /usr/local/etc/php-fpm.d/zz-fnos.conf
 
-# nginx
+# nginx：用自定义主配置（main 层 worker 性能参数 + http 层），conf.d 下放 server 块
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
-RUN rm -f /etc/nginx/sites-enabled/default
+COPY docker/nginx-main.conf /etc/nginx/nginx.conf
+RUN rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf.dpkg-dist
 
 # supervisor 进程托管
 COPY docker/supervisord.conf /etc/supervisor/conf.d/fnos.conf

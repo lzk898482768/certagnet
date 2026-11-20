@@ -1,5 +1,27 @@
 # 更新日志
 
+## v2.99.86 — 飞牛 fnOS 全链路稳定性与性能优化，定时任务生产级加固（2026-11-20）
+
+### 定时任务（消息推送可靠性）
+- 重写 `docker/scheduler.sh`：任务级 `timeout` 限时（默认到期检测 15 分钟、政务同步 25 分钟），避免政务网 HTTP 挂起导致整个调度循环卡死、连带到期提醒停摆
+- 新增非阻塞文件锁（mkdir 原子锁）防重入，上一轮未结束则本轮跳过，杜绝并发重复执行
+- 新增心跳文件 `runtime/scheduler.heartbeat` 与持久日志 `runtime/log/scheduler.log`，可从外部判断调度器存活与历史结果
+- 工具缺失自动降级（无 timeout 退化为不限时）、TERM/INT 优雅退出并释放锁；间隔/超时全部可经环境变量调整
+
+### 性能（4GB NAS 为默认基线，参数全部 .env 可调，高规格 NAS 改配置即放大）
+- MySQL 8：新增 InnoDB buffer pool（默认 256M）、redo log、连接数、临时表、慢查询日志等调优，全部 `MYSQL_*` 可覆盖
+- Redis 7：新增内存上限（默认 256M）+ `volatile-lru` 淘汰（只淘汰带 TTL 的缓存/会话，不碰持久数据）、空闲连接回收，关闭 RDB 仅保留 AOF 减少 NAS IO，`REDIS_*` 可覆盖
+- 新增 `config/session.php` 将框架原生 Session（如有启用）强制指向 Redis，杜绝任何会话文件落到 NAS 挂载卷；本系统登录态与验证码本就基于 Redis 自定义 token / 缓存，此次为防御性加固，**无迁移、无需重新登录**
+- 数据库 `debug` 改为 env 控制且默认关闭，生产不再逐条记录 SQL 调试日志
+- PHP-FPM 进程池参数 env 化并按 4GB 收敛（max_children 默认 12），entrypoint 启动时渲染，高规格 NAS 可调大
+- nginx：拆分 main 主配置（worker_processes auto、worker_connections 2048、keepalive、sendfile），启用 gzip_static 与 fastcgi keepalive 复用
+- OPcache `max_accelerated_files` 由 20000 提升到 40000，适配含 vendor 的较大文件数，避免缓存触顶后性能回落
+- 两份 compose（本地构建 / ACR）保持同步；CI 的 nginx 校验同步覆盖新的主配置
+
+### 文档
+- README 重写「升级」章节（ACR 一键升级、fileMode 权限位、端口持久化、升级验证），新增「定时任务」与「性能调优」说明
+- 《快速开始》补充定时任务零配置说明与调优入口
+
 ## v2.99.85 — 彻底修复接口 302 跳 /web/：改用 ThinkPHP 兼容模式重写（2026-11-20）
 
 - 接续 v2.99.84：84 仅在 PHP 段加 `fastcgi_split_path_info`，但根 location 的兜底是裸 `/index.php`（未携带路径后缀），`PATH_INFO` 仍为空，问题未根治

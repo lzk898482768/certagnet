@@ -208,5 +208,25 @@ else
     log "警告：无法调整 data 目录属主，请确认挂载目录允许容器 root 写入"
 fi
 
+# ---------------- 渲染 php-fpm 进程池参数（env 可调，默认按 4GB NAS 调优） ----------------
+# 镜像内 zz-fnos.conf 使用 ${FNOS_PM_*} 占位符；此处用 sed 替换为环境变量或默认值，
+# 不依赖 envsubst（基础镜像未必自带 gettext）。
+FPM_CONF=/usr/local/etc/php-fpm.d/zz-fnos.conf
+if [ -f "$FPM_CONF" ]; then
+    PM_MAX_CHILDREN="${FNOS_PM_MAX_CHILDREN:-12}"
+    PM_START_SERVERS="${FNOS_PM_START_SERVERS:-4}"
+    PM_MIN_SPARE="${FNOS_PM_MIN_SPARE_SERVERS:-2}"
+    PM_MAX_SPARE="${FNOS_PM_MAX_SPARE_SERVERS:-6}"
+    PM_MAX_REQUESTS="${FNOS_PM_MAX_REQUESTS:-500}"
+    sed -i \
+        -e "s|\${FNOS_PM_MAX_CHILDREN}|${PM_MAX_CHILDREN}|g" \
+        -e "s|\${FNOS_PM_START_SERVERS}|${PM_START_SERVERS}|g" \
+        -e "s|\${FNOS_PM_MIN_SPARE_SERVERS}|${PM_MIN_SPARE}|g" \
+        -e "s|\${FNOS_PM_MAX_SPARE_SERVERS}|${PM_MAX_SPARE}|g" \
+        -e "s|\${FNOS_PM_MAX_REQUESTS}|${PM_MAX_REQUESTS}|g" \
+        "$FPM_CONF"
+    log "php-fpm 进程池：max_children=${PM_MAX_CHILDREN} start=${PM_START_SERVERS} spare=${PM_MIN_SPARE}-${PM_MAX_SPARE} max_requests=${PM_MAX_REQUESTS}"
+fi
+
 log "初始化完成，启动 nginx / php-fpm / 定时任务"
 exec "$@"

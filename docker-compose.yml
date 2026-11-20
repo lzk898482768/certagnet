@@ -18,6 +18,16 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
       - --default-time-zone=+08:00
+      # 性能调优（4GB NAS 基线，全部可在 .env 用 MYSQL_* 覆盖，高规格 NAS 调大即可）
+      - --innodb-buffer-pool-size=${MYSQL_INNODB_BUFFER_POOL_SIZE:-268435456}
+      - --innodb-log-file-size=${MYSQL_INNODB_LOG_FILE_SIZE:-134217728}
+      - --innodb-flush-log-at-trx-commit=${MYSQL_INNODB_FLUSH_LOG_AT_TRX_COMMIT:-1}
+      - --max-connections=${MYSQL_MAX_CONNECTIONS:-100}
+      - --table-open-cache=${MYSQL_TABLE_OPEN_CACHE:-1000}
+      - --tmp-table-size=${MYSQL_TMP_TABLE_SIZE:-33554432}
+      - --max-heap-table-size=${MYSQL_MAX_HEAP_TABLE_SIZE:-33554432}
+      - --slow-query-log=${MYSQL_SLOW_QUERY_LOG:-1}
+      - --long-query-time=${MYSQL_LONG_QUERY_TIME:-2}
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?请在 .env 中设置 DB_ROOT_PASSWORD}
       MYSQL_DATABASE: ${DB_NAME:-cert_agent_fnos}
@@ -42,7 +52,22 @@ services:
     # 可选：改用阿里云 ACR 中的 redis 镜像，见 tools/push-acr.sh
     image: ${REDIS_IMAGE:-redis:7-alpine}
     restart: unless-stopped
-    command: ["sh", "-ec", 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
+    # 性能/内存调优（4GB NAS 基线，可在 .env 用 REDIS_* 覆盖）
+    # --maxmemory + volatile-lru：给内存设上限，满了只淘汰带 TTL 的缓存/会话 key，
+    #   不影响无 TTL 的持久数据；--save "" 关闭 RDB 快照减少 NAS IO，保留 AOF 做持久化。
+    command:
+      - sh
+      - -ec
+      - |
+        exec redis-server \
+          --appendonly yes \
+          --appendfsync ${REDIS_APPENDFSYNC:-everysec} \
+          --requirepass "$$REDIS_PASSWORD" \
+          --maxmemory ${REDIS_MAXMEMORY:-268435456} \
+          --maxmemory-policy ${REDIS_MAXMEMORY_POLICY:-volatile-lru} \
+          --save "" \
+          --timeout ${REDIS_TIMEOUT:-300} \
+          --tcp-keepalive 60
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?请在 .env 中设置 REDIS_PASSWORD}
       TZ: Asia/Shanghai
@@ -92,6 +117,16 @@ services:
       PHP_GOV_PASSWORD_KEY: ${GOV_PASSWORD_KEY:?请在 .env 中设置 GOV_PASSWORD_KEY}
       # 飞牛版关闭页面「在线升级」：代码在镜像层内，升级统一 git pull + 重建镜像
       PHP_UPGRADE_ENABLED: "0"
+      # PHP-FPM 进程池（默认按 4GB NAS 调优；高规格 NAS 调大 PM_MAX_CHILDREN）
+      FNOS_PM_MAX_CHILDREN: ${PM_MAX_CHILDREN:-12}
+      FNOS_PM_START_SERVERS: ${PM_START_SERVERS:-4}
+      FNOS_PM_MIN_SPARE_SERVERS: ${PM_MIN_SPARE_SERVERS:-2}
+      FNOS_PM_MAX_SPARE_SERVERS: ${PM_MAX_SPARE_SERVERS:-6}
+      FNOS_PM_MAX_REQUESTS: ${PM_MAX_REQUESTS:-500}
+      # 定时任务调度器（单位秒）
+      FNOS_SCHED_INTERVAL: ${SCHED_INTERVAL:-3600}
+      FNOS_TASK_TIMEOUT_CHECK: ${TASK_TIMEOUT_CHECK:-900}
+      FNOS_TASK_TIMEOUT_GOV: ${TASK_TIMEOUT_GOV:-1500}
     volumes:
       # 配置（.env）与安装锁在容器重建后保留
       - ./data/config:/data/config
