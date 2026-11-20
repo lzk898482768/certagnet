@@ -13,7 +13,7 @@
 #   sh tools/push-acr.sh
 #
 # 可选：
-#   ACR_TAG=2.99.78          应用镜像标签，默认取 VERSION
+#   ACR_TAG=2.99.79          应用镜像标签，默认取 VERSION
 #   ACR_PLATFORM=linux/amd64 目标架构，飞牛 x86_64 用默认值
 #
 # 推送内容：

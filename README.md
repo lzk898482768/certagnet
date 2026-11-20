@@ -1,9 +1,9 @@
 # 飞牛 fnOS 部署仓库
 
-证照到期管理系统的飞牛 fnOS 专用部署包：**独立 Gitee 仓库、独立 MySQL 数据库、独立数据目录**。
+证照到期管理系统的飞牛 fnOS 专用部署包：**独立 GitHub 仓库、独立 MySQL 数据库、独立数据目录**。
 
 - 主程序版本：v2.99.75
-- 部署包版本：v2.99.78
+- 部署包版本：v2.99.79
 - 部署形态：单应用容器（nginx + php-fpm + 定时任务），MySQL 8 与 Redis 7 各自独立容器
 - 默认独立库名：`cert_agent_fnos`（不会读取或覆盖现有 `cert_agent` 数据）
 
@@ -36,13 +36,13 @@
 ```bash
 mkdir -p /vol1/1000/docker
 cd /vol1/1000/docker
-git clone git@gitee.com:kxunyun/cert-expiry-manager-fnos.git
+git clone https://github.com/lzk898482768/certagnet.git cert-expiry-manager-fnos
 cd cert-expiry-manager-fnos
 sh install.sh
 ```
 
-> 私有库需要先给飞牛配置 Gitee SSH key；没有 SSH key 时，可先在电脑上克隆/下载压缩包，
-> 再上传到飞牛目录，或使用带令牌的 HTTPS 地址。
+> 仓库为 GitHub 公开库，可直接用 HTTPS 克隆；如需令牌，使用 GitHub Personal Access Token。
+> 无法访问 GitHub 时，可先在电脑上克隆/下载压缩包，再上传到飞牛目录。
 
 脚本会自动生成 `.env` 随机密码、构建镜像（自动安装 PHP 扩展 / nginx / supervisor 等依赖）、
 启动 MySQL 8 与 Redis 7，并由容器入口完成建库、导入数据、创建管理员。
@@ -73,9 +73,9 @@ cd /vol1/1000/docker/cert-expiry-manager-fnos
 
 把本仓库代码放进去，二选一：
 
-- **Gitee 克隆**（私有库需先配置 SSH key 或使用带令牌的 HTTPS 地址）：
+- **GitHub 克隆**（公开库，直接 HTTPS；私有化后需使用 Personal Access Token）：
   ```bash
-  git clone git@gitee.com:kxunyun/cert-expiry-manager-fnos.git .
+  git clone https://github.com/lzk898482768/certagnet.git .
   ```
 - **本地上传**：把仓库压缩包上传到该目录后解压。
 
@@ -386,6 +386,9 @@ node tools/sync-from-main.mjs /path/to/cert-expiry-manager
 脚本会用主仓库当前提交的 `backend/` 覆盖本仓库 `backend/`，并更新 `VERSION`。
 检查差异后提交、打标签即可。
 
+> **发布渠道**：本仓库只发布到 GitHub `lzk898482768/certagnet`，不再推送 Gitee。
+> 飞牛侧统一用 `git pull` + `docker compose up -d --build`（或 ACR 镜像）升级。
+
 ---
 
 ## 十一、使用阿里云 ACR（可选）
@@ -399,7 +402,7 @@ node tools/sync-from-main.mjs /path/to/cert-expiry-manager
 先在**能访问 Docker Hub 的 x86_64 构建机**上执行（首次拉基础镜像需要 Docker Hub）：
 
 ```bash
-git clone git@gitee.com:kxunyun/cert-expiry-manager-fnos.git
+git clone https://github.com/lzk898482768/certagnet.git cert-expiry-manager-fnos
 cd cert-expiry-manager-fnos
 
 export ACR_REGISTRY=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com
@@ -428,7 +431,7 @@ git pull
 # ACR_REGISTRY=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com
 # ACR_NAMESPACE=certagent
 # ACR_APP_REPO=certagent
-# ACR_TAG=2.99.78
+# ACR_TAG=2.99.79
 
 docker login crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com --username '你的阿里云账号'
 docker compose -f docker-compose.acr.yml --env-file .env pull

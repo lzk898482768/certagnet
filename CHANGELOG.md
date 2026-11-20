@@ -1,5 +1,11 @@
 # 更新日志
 
+## v2.99.79 — 发布渠道切换为 GitHub（2026-11-20）
+
+- 飞牛版后续只发布到 GitHub `lzk898482768/certagnet`，不再推送 Gitee
+- README 克隆地址与说明改为 GitHub，仓库已公开，可直接 HTTPS 克隆
+- 影响范围仅文档与发布流程，镜像与编排无变化
+
 ## v2.99.78 — 预置 ACR certagent 仓库并新增 GitHub Actions（2026-11-20）
 
 - 默认 ACR 命名空间设为 `certagent`，应用镜像仓库设为 `certagent`
