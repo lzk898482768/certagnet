@@ -1,5 +1,11 @@
 # 更新日志
 
+## v2.99.80 — ACR 镜像 tag 与部署版本对齐（2026-11-20）
+
+- GitHub Actions 已推送 `certagent/certagent:2.99.78`、`:2.99.79`、`:latest`，基础镜像 php / mysql / redis 齐备
+- `.env.example` 默认 `ACR_TAG` 改为固定版本号 `2.99.80`，避免直接用 `latest` 导致回滚困难
+- README / `tools/push-acr.sh` 示例 tag 同步更新
+
 ## v2.99.79 — 发布渠道切换为 GitHub（2026-11-20）
 
 - 飞牛版后续只发布到 GitHub `lzk898482768/certagnet`，不再推送 Gitee

@@ -3,7 +3,7 @@
 证照到期管理系统的飞牛 fnOS 专用部署包：**独立 GitHub 仓库、独立 MySQL 数据库、独立数据目录**。
 
 - 主程序版本：v2.99.75
-- 部署包版本：v2.99.79
+- 部署包版本：v2.99.80
 - 部署形态：单应用容器（nginx + php-fpm + 定时任务），MySQL 8 与 Redis 7 各自独立容器
 - 默认独立库名：`cert_agent_fnos`（不会读取或覆盖现有 `cert_agent` 数据）
 
@@ -431,7 +431,7 @@ git pull
 # ACR_REGISTRY=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com
 # ACR_NAMESPACE=certagent
 # ACR_APP_REPO=certagent
-# ACR_TAG=2.99.79
+# ACR_TAG=2.99.80
 
 docker login crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com --username '你的阿里云账号'
 docker compose -f docker-compose.acr.yml --env-file .env pull
