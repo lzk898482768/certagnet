@@ -6,21 +6,22 @@
 #
 # 用法：
 #   export ACR_REGISTRY=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com
-#   export ACR_NAMESPACE=你的ACR命名空间
+#   export ACR_NAMESPACE=certagent
+#   export ACR_APP_REPO=certagent
 #   export ACR_USERNAME='你的阿里云账号'
 #   read -s ACR_PASSWORD && export ACR_PASSWORD     # 不写进仓库/脚本
 #   sh tools/push-acr.sh
 #
 # 可选：
-#   ACR_TAG=2.99.77          应用镜像标签，默认取 VERSION
+#   ACR_TAG=2.99.78          应用镜像标签，默认取 VERSION
 #   ACR_PLATFORM=linux/amd64 目标架构，飞牛 x86_64 用默认值
 #
 # 推送内容：
 #   <registry>/<namespace>/php:8.2-fpm-bookworm
 #   <registry>/<namespace>/mysql:8.0
 #   <registry>/<namespace>/redis:7-alpine
-#   <registry>/<namespace>/cert-expiry-manager-fnos:<VERSION>
-#   <registry>/<namespace>/cert-expiry-manager-fnos:latest
+#   <registry>/<namespace>/certagent:<VERSION>
+#   <registry>/<namespace>/certagent:latest
 
 set -eu
 
@@ -32,7 +33,8 @@ die() { printf '[acr] 错误：%s\n' "$*" >&2; exit 1; }
 command -v docker >/dev/null 2>&1 || die "未找到 docker，请在装有 Docker 的机器上执行"
 
 ACR_REGISTRY="${ACR_REGISTRY:-crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com}"
-ACR_NAMESPACE="${ACR_NAMESPACE:-}"
+ACR_NAMESPACE="${ACR_NAMESPACE:-certagent}"
+ACR_APP_REPO="${ACR_APP_REPO:-certagent}"
 ACR_USERNAME="${ACR_USERNAME:-}"
 ACR_TAG="${ACR_TAG:-$(cat VERSION 2>/dev/null || echo latest)}"
 ACR_PLATFORM="${ACR_PLATFORM:-linux/amd64}"
@@ -68,7 +70,7 @@ for src in $BASE_IMAGES; do
     docker push "$dst" || die "推送失败；请先在 ACR 控制台创建命名空间 $ACR_NAMESPACE，并确认账号有推送权限"
 done
 
-APP_IMAGE="$ACR_REGISTRY/$ACR_NAMESPACE/cert-expiry-manager-fnos"
+APP_IMAGE="$ACR_REGISTRY/$ACR_NAMESPACE/$ACR_APP_REPO"
 PHP_IMAGE="$ACR_REGISTRY/$ACR_NAMESPACE/php:8.2-fpm-bookworm"
 
 log "构建应用镜像 $APP_IMAGE:$ACR_TAG（基础镜像使用 ACR 中的 php）..."
@@ -97,6 +99,7 @@ cat <<EOF
 在飞牛仓库根目录 .env 中增加：
   ACR_REGISTRY=$ACR_REGISTRY
   ACR_NAMESPACE=$ACR_NAMESPACE
+  ACR_APP_REPO=$ACR_APP_REPO
   ACR_TAG=$ACR_TAG
 
 然后在飞牛上执行：

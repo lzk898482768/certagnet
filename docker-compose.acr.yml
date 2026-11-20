@@ -18,7 +18,7 @@
 
 services:
   mysql:
-    image: ${ACR_REGISTRY:-crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com}/${ACR_NAMESPACE:?请在 .env 中设置 ACR_NAMESPACE}/mysql:${MYSQL_TAG:-8.0}
+    image: ${ACR_REGISTRY:-crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com}/${ACR_NAMESPACE:-certagent}/mysql:${MYSQL_TAG:-8.0}
     restart: unless-stopped
     command:
       - --default-authentication-plugin=mysql_native_password
@@ -46,7 +46,7 @@ services:
         max-file: "3"
 
   redis:
-    image: ${ACR_REGISTRY:-crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com}/${ACR_NAMESPACE:?请在 .env 中设置 ACR_NAMESPACE}/redis:${REDIS_TAG:-7-alpine}
+    image: ${ACR_REGISTRY:-crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com}/${ACR_NAMESPACE:-certagent}/redis:${REDIS_TAG:-7-alpine}
     restart: unless-stopped
     command: ["sh", "-ec", 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
     environment:
@@ -67,7 +67,7 @@ services:
         max-file: "3"
 
   app:
-    image: ${ACR_REGISTRY:-crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com}/${ACR_NAMESPACE:?请在 .env 中设置 ACR_NAMESPACE}/cert-expiry-manager-fnos:${ACR_TAG:-latest}
+    image: ${ACR_REGISTRY:-crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com}/${ACR_NAMESPACE:-certagent}/${ACR_APP_REPO:-certagent}:${ACR_TAG:-latest}
     restart: unless-stopped
     ports:
       - "${HTTP_PORT:-8080}:80"

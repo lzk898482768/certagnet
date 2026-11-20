@@ -3,7 +3,7 @@
 证照到期管理系统的飞牛 fnOS 专用部署包：**独立 Gitee 仓库、独立 MySQL 数据库、独立数据目录**。
 
 - 主程序版本：v2.99.75
-- 部署包版本：v2.99.77
+- 部署包版本：v2.99.78
 - 部署形态：单应用容器（nginx + php-fpm + 定时任务），MySQL 8 与 Redis 7 各自独立容器
 - 默认独立库名：`cert_agent_fnos`（不会读取或覆盖现有 `cert_agent` 数据）
 
@@ -366,6 +366,8 @@ v2.99.76 已删除 `image:` 声明，镜像名由 Compose 自动生成。若暂�
 │   ├── php-fpm.conf           # clear_env=no 等
 │   └── supervisord.conf       # 进程托管
 ├── backend/                   # 主程序（含 vendor 与前端构建产物）
+├── .github/workflows/
+│   └── acr-push.yml           # GitHub Actions：推送全部镜像到阿里云 ACR
 └── tools/
     ├── push-acr.sh            # 把镜像推送到阿里云 ACR
     └── sync-from-main.mjs     # 从主仓库同步 backend
@@ -389,7 +391,8 @@ node tools/sync-from-main.mjs /path/to/cert-expiry-manager
 ## 十一、使用阿里云 ACR（可选）
 
 如果飞牛访问 Docker Hub 很慢或失败，可以先把镜像推送到阿里云容器镜像服务（ACR）。
-两种用法，任选一种。
+三种用法，任选一种。当前 ACR：实例 `crpi-e8ivxiujwrjswkb4`，命名空间 `certagent`，
+应用镜像仓库 `certagent`，公网地址 `crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com`。
 
 ### 方式 A：全部镜像从 ACR 拉取，飞牛不构建（推荐）
 
@@ -400,7 +403,8 @@ git clone git@gitee.com:kxunyun/cert-expiry-manager-fnos.git
 cd cert-expiry-manager-fnos
 
 export ACR_REGISTRY=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com
-export ACR_NAMESPACE=你的ACR命名空间
+export ACR_NAMESPACE=certagent
+export ACR_APP_REPO=certagent
 export ACR_USERNAME='你的阿里云账号'
 read -s ACR_PASSWORD && export ACR_PASSWORD
 
@@ -409,10 +413,10 @@ sh tools/push-acr.sh
 
 脚本会推送：
 
-- `php:8.2-fpm-bookworm`
-- `mysql:8.0`
-- `redis:7-alpine`
-- `cert-expiry-manager-fnos:<VERSION>` 与 `:latest`
+- `certagent/php:8.2-fpm-bookworm`
+- `certagent/mysql:8.0`
+- `certagent/redis:7-alpine`
+- `certagent/certagent:<VERSION>` 与 `:latest`
 
 然后在飞牛上：
 
@@ -422,8 +426,9 @@ git pull
 
 # 在 .env 里增加（模板见 .env.example）：
 # ACR_REGISTRY=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com
-# ACR_NAMESPACE=你的ACR命名空间
-# ACR_TAG=2.99.77
+# ACR_NAMESPACE=certagent
+# ACR_APP_REPO=certagent
+# ACR_TAG=2.99.78
 
 docker login crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com --username '你的阿里云账号'
 docker compose -f docker-compose.acr.yml --env-file .env pull
@@ -438,16 +443,37 @@ docker compose -f docker-compose.acr.yml --env-file .env up -d
 构建机同样先执行 `tools/push-acr.sh`（至少推送 php / mysql / redis），然后在飞牛 `.env` 中设置：
 
 ```ini
-PHP_BASE_IMAGE=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com/<命名空间>/php:8.2-fpm-bookworm
-MYSQL_IMAGE=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com/<命名空间>/mysql:8.0
-REDIS_IMAGE=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com/<命名空间>/redis:7-alpine
+PHP_BASE_IMAGE=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com/certagent/php:8.2-fpm-bookworm
+MYSQL_IMAGE=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com/certagent/mysql:8.0
+REDIS_IMAGE=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com/certagent/redis:7-alpine
 ```
 
 之后仍执行 `docker compose up -d --build`。
 
+### 方式 C：用 GitHub Actions 推送全部镜像
+
+如果本机/飞牛都没有 Docker Hub 访问能力，可以直接让 GitHub Actions 在云端拉取并推送：
+
+1. 打开 GitHub 仓库 `lzk898482768/certagnet` → `Settings` → `Secrets and variables` → `Actions`；
+2. 新增两个 Repository secret：
+   - `ACR_USERNAME`：阿里云账号（不是命名空间 `certagent`）
+   - `ACR_PASSWORD`：ACR 访问凭证/固定密码
+3. 打开 `Actions` → `Push images to Aliyun ACR` → `Run workflow`；
+4. 工作流会推送 `certagent/php`、`certagent/mysql`、`certagent/redis`、`certagent/certagent`。
+
+工作流文件是 `.github/workflows/acr-push.yml`，默认手动触发，不会在每次提交时自动跑。
+如需以后打 tag 自动推送，可在该文件的 `on:` 下增加：
+
+```yaml
+  push:
+    tags:
+      - 'v*'
+```
+
 注意事项：
 
-- `ACR_NAMESPACE` 是 ACR 控制台里创建的命名空间，不是登录用户名；首次推送前先创建。
+- `ACR_NAMESPACE` 是 ACR 控制台里创建的命名空间，不是登录用户名；当前为 `certagent`。
+- `ACR_APP_REPO` 是 ACR 控制台里的“仓库名称”；当前为 `certagent`。基础镜像仓库分别是 `php` / `mysql` / `redis`。
 - ACR 个人版默认私有仓库，飞牛必须先 `docker login` 才能拉取。
 - 如果构建机也访问不了 Docker Hub，先在 ACR 控制台使用「镜像同步/镜像加速」导入基础镜像，
   或让构建机走代理；`push-acr.sh` 本身无法凭空下载镜像。

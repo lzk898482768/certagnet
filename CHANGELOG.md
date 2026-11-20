@@ -1,5 +1,12 @@
 # 更新日志
 
+## v2.99.78 — 预置 ACR certagent 仓库并新增 GitHub Actions（2026-11-20）
+
+- 默认 ACR 命名空间设为 `certagent`，应用镜像仓库设为 `certagent`
+- 新增 `.github/workflows/acr-push.yml`：在 GitHub Actions 中手动推送 php / mysql / redis / 应用镜像
+- `tools/push-acr.sh`、`docker-compose.acr.yml`、`.env.example`、README 同步更新
+- 工作流只读取 GitHub Secrets `ACR_USERNAME` / `ACR_PASSWORD`，不包含任何密码
+
 ## v2.99.77 — 支持阿里云 ACR 镜像推送与部署（2026-11-20）
 
 - 新增 `tools/push-acr.sh`：把 `php:8.2-fpm-bookworm`、`mysql:8.0`、`redis:7-alpine` 与应用镜像推送到阿里云 ACR

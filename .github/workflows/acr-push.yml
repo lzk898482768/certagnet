@@ -1,0 +1,61 @@
+# 手动把飞牛版需要的全部镜像推送到阿里云 ACR。
+#
+# 使用前在 GitHub 仓库：
+#   Settings → Secrets and variables → Actions → New repository secret
+#   ACR_USERNAME = 阿里云账号（不是命名空间）
+#   ACR_PASSWORD = ACR 访问凭证/固定密码
+#
+# 然后：
+#   Actions → Push images to Aliyun ACR → Run workflow
+#
+# 推送内容：php / mysql / redis / 应用镜像（certagent 命名空间）。
+# 工作流不在每次 push 时自动运行，避免误触发长时间构建；需要时手动执行。
+
+name: Push images to Aliyun ACR
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "应用镜像标签（留空使用 VERSION）"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: acr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Check ACR secrets
+        env:
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+        run: |
+          if [ -z "$ACR_USERNAME" ] || [ -z "$ACR_PASSWORD" ]; then
+            echo "::error::请先在 Settings → Secrets and variables → Actions 添加 ACR_USERNAME 和 ACR_PASSWORD"
+            exit 1
+          fi
+
+      - name: Push all images
+        env:
+          ACR_REGISTRY: crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com
+          ACR_NAMESPACE: certagent
+          ACR_APP_REPO: certagent
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+          ACR_TAG: ${{ inputs.tag }}
+          ACR_PLATFORM: linux/amd64
+        run: sh tools/push-acr.sh
