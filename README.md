@@ -18,7 +18,7 @@ cd /vol1/1000/docker && git clone https://github.com/lzk898482768/certagnet.git 
 ---
 
 - 主程序版本：v2.99.75
-- 部署包版本：v2.99.84
+- 部署包版本：v2.99.85
 - 部署形态：单应用容器（nginx + php-fpm + 定时任务），MySQL 8 与 Redis 7 各自独立容器
 - 默认独立库名：`cert_agent_fnos`（不会读取或覆盖现有 `cert_agent` 数据）
 
@@ -63,7 +63,7 @@ chmod 600 .env
 
 sh deploy-acr.sh            # 用 .env 里的 ACR_TAG
 # 或指定版本：
-sh deploy-acr.sh 2.99.84
+sh deploy-acr.sh 2.99.85
 ```
 
 `deploy-acr.sh` 等价于 `sh install.sh --acr [--tag <版本>]`，会自动完成：
@@ -480,7 +480,7 @@ git pull
 # ACR_REGISTRY=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com
 # ACR_NAMESPACE=certagent
 # ACR_APP_REPO=certagent
-# ACR_TAG=2.99.84
+# ACR_TAG=2.99.85
 
 docker login crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com --username '你的阿里云账号'
 docker compose -f docker-compose.acr.yml --env-file .env pull

@@ -1,5 +1,12 @@
 # 更新日志
 
+## v2.99.85 — 彻底修复接口 302 跳 /web/：改用 ThinkPHP 兼容模式重写（2026-11-20）
+
+- 接续 v2.99.84：84 仅在 PHP 段加 `fastcgi_split_path_info`，但根 location 的兜底是裸 `/index.php`（未携带路径后缀），`PATH_INFO` 仍为空，问题未根治
+- 本版把 `location /` 兜底改为 ThinkPHP 官方兼容模式 `try_files $uri $uri/ /index.php?s=$uri&$args`
+- ThinkPHP `Request::pathinfo()` 读取优先级为 `$_GET['s'] > PATH_INFO > 其它`，从 `s` 参数取路由后，彻底不依赖 `cgi.fix_pathinfo` / PATH_INFO / split_path_info，任何环境下路由都能正确解析
+- 保留 84 的 PHP 段显式 PATH_INFO 与诊断探针 `envprobe.php`，作为双保险与现场排障手段
+
 ## v2.99.84 — 修复 PATH_INFO 丢失导致所有接口被 302 跳到 /web/（2026-11-20）
 
 - 现象：访问 `/api/captcha` 等任意接口均返回 `302 Location: /web/`，验证码无法加载、登录不可用
