@@ -94,9 +94,7 @@ class Menu extends AdminController
         if (UpgradeService::enabled()) {
             return $list;
         }
-        return array_values(array_filter($list, static function ($m) {
-            return (int)($m['id'] ?? 0) !== 74;
-        }));
+        return MenuCatalog::withoutUpgradeMenu($list);
     }
 
     /**

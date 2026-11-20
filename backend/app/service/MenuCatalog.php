@@ -346,6 +346,28 @@ class MenuCatalog
     }
 
     /**
+     * 移除 74 号「在线升级」菜单（含子节点），用于关闭在线升级的部署。
+     *
+     * 菜单树可能命中 Redis 缓存，且 ensureSchema() 有 60 秒节流；仅靠数据库
+     * status=0 在升级后第一次请求时仍可能返回旧缓存。登录接口输出前再过滤一遍，
+     * 保证侧边栏立即不可见。传入扁平列表同样适用。
+     */
+    public static function withoutUpgradeMenu(array $menus): array
+    {
+        $out = [];
+        foreach ($menus as $menu) {
+            if ((int)($menu['id'] ?? 0) === 74) {
+                continue;
+            }
+            if (!empty($menu['children']) && is_array($menu['children'])) {
+                $menu['children'] = self::withoutUpgradeMenu($menu['children']);
+            }
+            $out[] = $menu;
+        }
+        return $out;
+    }
+
+    /**
      * v2.32 一次性菜单恢复（独立迁移标记，不受 VERSION 门控影响）
      *
      * 为什么独立：ensureSchema() 的 VERSION early-return 会屏蔽「版本写入之后」

@@ -264,6 +264,10 @@ class Auth extends BaseController
             $perms = null;
         }
         // v2.69：空分组不返回（避免侧边栏出现点不动的空目录）
+        // 飞牛版关闭在线升级：菜单树可能命中旧 Redis 缓存，输出前再过滤 74 号菜单
+        if (!\app\service\UpgradeService::enabled()) {
+            $menus = \app\service\MenuCatalog::withoutUpgradeMenu($menus);
+        }
         $menus = SysMenu::pruneEmptyGroups($menus);
         return json(r_success(['user' => $userData, 'menus' => $menus, 'perms' => $perms]));
     }

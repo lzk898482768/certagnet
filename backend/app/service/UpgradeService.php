@@ -4,7 +4,7 @@ namespace app\service;
 use think\facade\Config;
 
 /**
- * 在线升级服务（v2.99.74）
+ * 在线升级服务（v2.99.75）
  *
  * 能力：
  *  - 读取 Gitee 仓库最新版本标签，与当前版本比较；
@@ -20,7 +20,7 @@ use think\facade\Config;
 class UpgradeService
 {
     /** 当前系统版本（与 CHANGELOG 对齐） */
-    public const CURRENT_VERSION = 'v2.99.74';
+    public const CURRENT_VERSION = 'v2.99.75';
 
     /** 最近一次 zipDir 的失败原因（用于升级提示） */
     private static $zipError = '';
