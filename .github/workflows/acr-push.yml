@@ -49,6 +49,12 @@ jobs:
             exit 1
           fi
 
+      - name: Validate nginx config syntax
+        run: |
+          docker run --rm \
+            -v "$PWD/docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginx:1.27-alpine nginx -t
+
       - name: Push all images
         env:
           ACR_REGISTRY: crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com

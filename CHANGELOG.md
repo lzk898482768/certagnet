@@ -1,5 +1,13 @@
 # 更新日志
 
+## v2.99.84 — 修复 PATH_INFO 丢失导致所有接口被 302 跳到 /web/（2026-11-20）
+
+- 现象：访问 `/api/captcha` 等任意接口均返回 `302 Location: /web/`，验证码无法加载、登录不可用
+- 根因：nginx 的 PHP location 未显式设置 `PATH_INFO`，仅依赖 PHP `cgi.fix_pathinfo` 兜底；该兜底在当前环境不生效时，ThinkPHP 把 pathinfo 解析为空，所有请求命中根路由的 UA 分流
+- 修复：nginx 改用 `fastcgi_split_path_info` 显式解析，并显式传递 `SCRIPT_NAME` / `PATH_INFO`，不再依赖兜底；location 调整为 `\.php(/|$)` 以承接带 path-info 的请求
+- 新增独立诊断探针 `envprobe.php`（不经框架/门禁，锁死态可访问），仅回显路由相关服务器变量，便于现场确认
+- CI（acr-push.yml）新增 nginx 配置语法校验步骤，配置有误在推送镜像前即失败
+
 ## v2.99.83 — 默认端口改为非常用端口 18080，适配 DDNS（2026-11-20）
 
 - 默认访问端口由 8080 改为非常用端口 18080（`.env` 的 `HTTP_PORT`，容器内部仍为 80）
