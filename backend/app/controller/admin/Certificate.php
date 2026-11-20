@@ -746,8 +746,9 @@ class Certificate extends AdminController
      */
     public function personCollect()
     {
-        if (!$this->can('cert', 'create')) {
-            return json(r_error('暂无新增证照权限，请联系管理员', 403));
+        // v2.99：编辑证书时同样可用一键采集，故放宽为「新增或编辑」任一权限即可
+        if (!$this->can('cert', 'create') && !$this->can('cert', 'edit')) {
+            return json(r_error('暂无证照采集权限，请联系管理员', 403));
         }
         $staffId    = (int)$this->request->post('staff_id', 0);
         $certType   = trim((string)$this->request->post('cert_type', ''));

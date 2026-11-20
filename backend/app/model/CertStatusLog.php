@@ -15,6 +15,16 @@ class CertStatusLog extends Model
         return $this->belongsTo(Certificate::class, 'cert_id');
     }
 
+    /**
+     * 关联借调记录（biz_type=secondment 时有效）。
+     * 一并预载持证人员与借调企业，供状态变更日志列表直接展示
+     * 人员姓名、借调企业、借调起止时间，避免前端只看到 #ID。
+     */
+    public function secondment()
+    {
+        return $this->belongsTo(CertSecondment::class, 'secondment_id');
+    }
+
     public function getStatusTextAttr($value, $data): string
     {
         // v2.76：借调状态与证书状态共用一张日志表，状态码含义不同
