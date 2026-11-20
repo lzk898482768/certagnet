@@ -62,7 +62,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: cert-expiry-manager-fnos:${APP_TAG:-latest}
+    # 不要在这里写 image: cert-expiry-manager-fnos:latest。
+    # Compose 同时看到 image + build 时，会先尝试从 Docker Hub 拉取这个本地镜像名，
+    # 飞牛「构建」会长时间卡在 “Image ... Pulling”。镜像名交给 Compose 自动生成即可。
     restart: unless-stopped
     ports:
       - "${HTTP_PORT:-8080}:80"

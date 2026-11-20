@@ -1,5 +1,12 @@
 # 更新日志
 
+## v2.99.76 — 修复飞牛「构建」卡在拉取本地镜像（2026-11-20）
+
+- 移除 `docker-compose.yml` 中 app 服务的 `image:` 声明：避免 Compose 构建前先尝试从 Docker Hub 拉取本地镜像名 `cert-expiry-manager-fnos:latest`，导致飞牛「构建」长时间停在 `Pulling`
+- 镜像名改由 Compose 根据项目名自动生成，`docker compose build` / `up -d --build` 直接本地构建
+- `README` 增加卡住原因、升级步骤与旧版本手工修复方法
+- 不影响数据库、`.env`、`data/` 目录与已有容器数据
+
 ## v2.99.75 — 登录菜单树兜底过滤在线升级（2026-11-20）
 
 - 登录接口输出菜单树前强制移除 74 号「在线升级」，避免旧 Redis 缓存或 60 秒节流期间仍显示入口

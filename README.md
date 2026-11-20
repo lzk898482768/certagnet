@@ -3,6 +3,7 @@
 证照到期管理系统的飞牛 fnOS 专用部署包：**独立 Gitee 仓库、独立 MySQL 数据库、独立数据目录**。
 
 - 主程序版本：v2.99.75
+- 部署包版本：v2.99.76
 - 部署形态：单应用容器（nginx + php-fpm + 定时任务），MySQL 8 与 Redis 7 各自独立容器
 - 默认独立库名：`cert_agent_fnos`（不会读取或覆盖现有 `cert_agent` 数据）
 
@@ -311,6 +312,27 @@ docker compose up -d --build
 这是飞牛版的预期行为：页面在线升级会替换容器内代码，容器重建后丢失，也会与镜像版本不一致。
 升级请按第六节执行 `git pull && docker compose up -d --build`。不要尝试通过菜单管理重新启用该菜单，
 后端会自动将其隐藏。
+
+**9. 「构建」一直卡在 `Image cert-expiry-manager-fnos:latest Pulling`**
+
+v2.99.75 及更早的 `docker-compose.yml` 同时声明了 `image:` 和 `build:`，飞牛/Docker 会先尝试
+从 Docker Hub 拉取这个本地镜像名，网络不通时就会一直卡住。
+
+先关闭卡住的构建，拉取 v2.99.76 后重新构建：
+
+```bash
+cd /vol1/1000/docker/cert-expiry-manager-fnos
+git pull
+docker compose build --no-cache
+docker compose up -d
+```
+
+v2.99.76 已删除 `image:` 声明，镜像名由 Compose 自动生成。若暂时不能升级，也可以手工删除
+`docker-compose.yml` 中 `app:` 下的 `image: cert-expiry-manager-fnos:${APP_TAG:-latest}` 一行，
+再执行 `docker compose build --no-cache && docker compose up -d`。
+
+> 首次构建仍会拉取 `php:8.2-fpm-bookworm`、`mysql:8.0`、`redis:7-alpine` 等基础镜像；
+> 如果停在这些真实镜像名上，属于 Docker Hub 网络问题，请配置镜像加速。
 
 ---
 
