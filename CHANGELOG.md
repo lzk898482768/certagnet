@@ -1,5 +1,12 @@
 # 更新日志
 
+## v2.99.81 — ACR 一键部署，复制到飞牛即可零/少交互完成（2026-11-20）
+
+- 新增 `deploy-acr.sh`：一键完成 ACR 登录、拉镜像、启动，支持 `sh deploy-acr.sh [版本号]`
+- `install.sh` 新增 `--acr` / `--tag` 参数；ACR 凭据支持环境变量或 `.env` 中 `ACR_USERNAME`/`ACR_PASSWORD`
+- 自动处理 Windows CRLF/BOM，密码走 `--password-stdin`，不写入日志
+- `.env.example` 增加 ACR 登录字段（留空即交互/环境变量方式）；README 增加「0A ACR 一键部署」章节
+
 ## v2.99.80 — ACR 镜像 tag 与部署版本对齐（2026-11-20）
 
 - GitHub Actions 已推送 `certagent/certagent:2.99.78`、`:2.99.79`、`:latest`，基础镜像 php / mysql / redis 齐备

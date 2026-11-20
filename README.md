@@ -3,7 +3,7 @@
 证照到期管理系统的飞牛 fnOS 专用部署包：**独立 GitHub 仓库、独立 MySQL 数据库、独立数据目录**。
 
 - 主程序版本：v2.99.75
-- 部署包版本：v2.99.80
+- 部署包版本：v2.99.81
 - 部署形态：单应用容器（nginx + php-fpm + 定时任务），MySQL 8 与 Redis 7 各自独立容器
 - 默认独立库名：`cert_agent_fnos`（不会读取或覆盖现有 `cert_agent` 数据）
 
@@ -29,7 +29,40 @@
 
 ## 二、安装步骤（SSH 方式，推荐）
 
-### 0. 最快方式：一键脚本
+### 0A. 最快方式：ACR 一键部署（不本地构建，推荐飞牛使用）
+
+把整个仓库目录复制到飞牛（`git clone` 或上传压缩包解压均可），然后：
+
+```bash
+cd /vol1/1000/docker/cert-expiry-manager-fnos
+
+# 二选一提供 ACR 凭据：
+#   方式 1（零交互）：在 .env 里填 ACR_USERNAME / ACR_PASSWORD
+cp .env.example .env
+vi .env          # 填 ACR_USERNAME、ACR_PASSWORD；其余密码项留空，脚本会自动生成
+chmod 600 .env
+
+#   方式 2：用环境变量传入（密码不落盘）
+# export ACR_USERNAME='你的阿里云账号'
+# read -s ACR_PASSWORD && export ACR_PASSWORD
+
+sh deploy-acr.sh            # 用 .env 里的 ACR_TAG
+# 或指定版本：
+sh deploy-acr.sh 2.99.81
+```
+
+`deploy-acr.sh` 等价于 `sh install.sh --acr [--tag <版本>]`，会自动完成：
+
+1. 检查 Docker / Compose；
+2. 首次运行生成 `.env`，随机填充 MySQL/Redis/管理员/密钥等所有空密码项；
+3. 登录 ACR（凭据来自环境变量或 `.env`，密码走 `--password-stdin`，不进日志）；
+4. `docker compose -f docker-compose.acr.yml pull` 拉取 php/mysql/redis/app 全部镜像；
+5. `up -d` 启动，容器入口自动建库、导入数据、创建管理员。
+
+> 私有 ACR 仓库必须登录；若仓库已设为公开，可直接跳过登录匿名拉取。
+> `.env` 已被 `.gitignore` 与 `.dockerignore` 排除，凭据不会进入仓库或镜像。
+
+### 0B. 本地构建方式（需要飞牛能访问 Docker Hub）
 
 如果飞牛已安装并启动 Docker，直接执行（路径以你实际的存储空间为准）：
 
@@ -431,7 +464,7 @@ git pull
 # ACR_REGISTRY=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com
 # ACR_NAMESPACE=certagent
 # ACR_APP_REPO=certagent
-# ACR_TAG=2.99.80
+# ACR_TAG=2.99.81
 
 docker login crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com --username '你的阿里云账号'
 docker compose -f docker-compose.acr.yml --env-file .env pull

@@ -3,17 +3,46 @@
 # 证照到期管理系统 —— 飞牛 fnOS 一键安装
 #
 # 用法：
-#   sh install.sh
+#   sh install.sh              本地构建模式（docker-compose.yml，需要访问 Docker Hub）
+#   sh install.sh --acr        阿里云 ACR 模式（docker-compose.acr.yml，只拉镜像不构建）
+#
+# ACR 模式可选参数 / 环境变量：
+#   --tag 2.99.81             覆盖 .env 中的 ACR_TAG（升级时用）
+#   ACR_USERNAME / ACR_PASSWORD  已设置时自动 docker login，不交互
 #
 # 脚本会：
 #   1. 检查 Docker / Docker Compose
-#   2. 首次运行时基于 .env.example 生成随机密码
-#   3. 执行 docker compose up -d --build（自动构建镜像并安装 PHP 扩展、nginx 等依赖）
-#   4. 启动 MySQL 8 / Redis 7，并由容器入口自动建库、导入数据、创建管理员
+#   2. 首次运行时基于 .env.example 生成 .env，并自动填充随机密码
+#   3. ACR 模式：按需登录 ACR、拉取全部镜像
+#   4. 启动 MySQL 8 / Redis 7 / 应用容器，入口自动建库、导入数据、创建管理员
 #
 set -eu
 
 cd "$(dirname "$0")"
+
+MODE="build"
+OVERRIDE_TAG=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --acr)
+            MODE="acr"
+            shift
+            ;;
+        --tag)
+            OVERRIDE_TAG="${2:?--tag 需要一个版本号参数，例如 --tag 2.99.81}"
+            shift 2
+            ;;
+        -h|--help)
+            sed -n '2,20p' "$0"
+            exit 0
+            ;;
+        *)
+            echo "未知参数：$1（可用：--acr、--tag <版本号>）" >&2
+            exit 1
+            ;;
+    esac
+done
 
 log() {
     printf '%s [install] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -81,6 +110,21 @@ fill_empty() {
     fi
 }
 
+# 覆盖已有键值（用于 --tag 升级）
+set_value() {
+    key="$1"
+    value="$2"
+    if grep -q "^${key}=" .env; then
+        awk -v k="$key" -v v="$value" -F= '
+            $1 == k { print k "=" v; next }
+            { print }
+        ' .env > .env.tmp
+        mv .env.tmp .env
+    else
+        printf '%s=%s\n' "$key" "$value" >> .env
+    fi
+}
+
 fill_empty DB_ROOT_PASSWORD "$(rand_hex 24)"
 fill_empty REDIS_PASSWORD "$(rand_hex 24)"
 fill_empty GOV_PASSWORD_KEY "$(rand_hex 32)"
@@ -92,9 +136,83 @@ admin_user=$(awk -F= '/^ADMIN_USER=/{print $2; exit}' .env)
 admin_pass=$(awk -F= '/^ADMIN_PASS=/{print $2; exit}' .env)
 http_port=$(awk -F= '/^HTTP_PORT=/{print $2; exit}' .env)
 
-# ---------------- 构建并启动 ----------------
-log "开始构建并启动（首次构建约 5～15 分钟，会自动安装 PHP 扩展 / nginx / supervisor 等依赖）..."
-docker compose up -d --build
+# ---------------- ACR 模式 ----------------
+if [ "$MODE" = "acr" ]; then
+    # 再次清理 CRLF，确保后续 awk 取到的值不含 \r（Windows 编辑/复制场景）
+    sed -i 's/\r$//' .env
+    acr_registry=$(awk -F= '/^ACR_REGISTRY=/{sub(/\r$/,"",$2); print $2; exit}' .env)
+    acr_registry="${acr_registry:-crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com}"
+    acr_namespace=$(awk -F= '/^ACR_NAMESPACE=/{sub(/\r$/,"",$2); print $2; exit}' .env)
+    acr_namespace="${acr_namespace:-certagent}"
+
+    if [ -n "$OVERRIDE_TAG" ]; then
+        set_value ACR_TAG "$OVERRIDE_TAG"
+        log "ACR_TAG 已设置为 $OVERRIDE_TAG"
+    fi
+
+    # 也允许把凭据写在 .env 中（ACR_USERNAME / ACR_PASSWORD），实现复制后零交互
+    if [ -z "${ACR_USERNAME:-}" ]; then
+        ACR_USERNAME=$(awk -F= '/^ACR_USERNAME=/{sub(/\r$/,"",$2); print $2; exit}' .env)
+    fi
+    if [ -z "${ACR_PASSWORD:-}" ]; then
+        ACR_PASSWORD=$(awk -F= '/^ACR_PASSWORD=/{sub(/\r$/,"",$2); print $2; exit}' .env)
+    fi
+
+    # 登录 ACR：优先环境变量；交互终端则提示输入；否则跳过（仓库已设为公开时可直接拉取）
+    if [ -n "${ACR_USERNAME:-}" ]; then
+        if [ -z "${ACR_PASSWORD:-}" ]; then
+            printf '请输入 ACR 访问凭证（用户名 %s）：' "$ACR_USERNAME"
+            stty_restore=""
+            if [ -t 0 ]; then stty -echo; stty_restore=1; fi
+            read -r ACR_PASSWORD
+            [ -n "$stty_restore" ] && stty echo
+            printf '\n'
+        fi
+        log "登录 ACR：$acr_registry（用户 $ACR_USERNAME）"
+        printf '%s' "$ACR_PASSWORD" | docker login "$acr_registry" \
+            --username "$ACR_USERNAME" --password-stdin
+        unset ACR_PASSWORD
+    elif [ -t 0 ]; then
+        printf 'ACR 命名空间 %s 的仓库若为私有，需要先登录。\n' "$acr_namespace"
+        printf '请输入 ACR 用户名（直接回车跳过登录，公开仓库可匿名拉取）：'
+        read -r acr_user
+        if [ -n "$acr_user" ]; then
+            printf '请输入 ACR 访问凭证：'
+            stty -echo
+            read -r acr_pass
+            stty echo
+            printf '\n'
+            log "登录 ACR：$acr_registry（用户 $acr_user）"
+            printf '%s' "$acr_pass" | docker login "$acr_registry" \
+                --username "$acr_user" --password-stdin
+            unset acr_pass
+        else
+            log "跳过 ACR 登录，直接尝试拉取"
+        fi
+    else
+        log "非交互终端且未提供 ACR_USERNAME/ACR_PASSWORD，跳过登录（公开仓库可直接拉取）"
+    fi
+
+    log "从 ACR 拉取全部镜像（registry=$acr_registry namespace=$acr_namespace）..."
+    if ! docker compose -f docker-compose.acr.yml --env-file .env pull; then
+        echo "错误：镜像拉取失败。请确认：" >&2
+        echo "  1. 已在 ACR 控制台创建命名空间 $acr_namespace 且镜像已推送" >&2
+        echo "  2. 私有仓库已执行 docker login $acr_registry" >&2
+        echo "  3. 飞牛能访问公网（或已配置 ACR VPC/专线地址）" >&2
+        exit 1
+    fi
+
+    log "启动容器（ACR 模式，不本地构建）..."
+    docker compose -f docker-compose.acr.yml --env-file .env up -d
+else
+    if [ -n "$OVERRIDE_TAG" ]; then
+        echo "错误：--tag 仅能与 --acr 一起使用" >&2
+        exit 1
+    fi
+    # ---------------- 本地构建模式 ----------------
+    log "开始构建并启动（首次构建约 5～15 分钟，会自动安装 PHP 扩展 / nginx / supervisor 等依赖）..."
+    docker compose up -d --build
+fi
 
 log "容器已启动。初始化日志：docker compose logs -f app"
 log "授权入口：http://<飞牛IP>:${http_port:-8080}/setup.php"
