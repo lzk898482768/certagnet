@@ -72,7 +72,7 @@ services:
     # 飞牛「构建」会长时间卡在 “Image ... Pulling”。镜像名交给 Compose 自动生成即可。
     restart: unless-stopped
     ports:
-      - "${HTTP_PORT:-8080}:80"
+      - "${HTTP_PORT:-18080}:80"
     environment:
       TZ: Asia/Shanghai
       FNOS_DB_HOST: mysql

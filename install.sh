@@ -202,7 +202,7 @@ else
 fi
 
 log "容器已启动。初始化日志：docker compose logs -f app"
-log "授权入口：http://<飞牛IP>:${http_port:-8080}/setup.php"
-log "登录入口：http://<飞牛IP>:${http_port:-8080}/web/"
+log "授权入口：http://<飞牛IP>:${http_port:-18080}/setup.php"
+log "登录入口：http://<飞牛IP>:${http_port:-18080}/web/"
 log "管理员账号：${admin_user:-admin}"
 log "管理员密码：${admin_pass:-请查看 .env 中的 ADMIN_PASS}"

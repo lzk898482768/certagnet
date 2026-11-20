@@ -70,7 +70,7 @@ services:
     image: ${ACR_REGISTRY:-crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com}/${ACR_NAMESPACE:-certagent}/${ACR_APP_REPO:-certagent}:${ACR_TAG:-latest}
     restart: unless-stopped
     ports:
-      - "${HTTP_PORT:-8080}:80"
+      - "${HTTP_PORT:-18080}:80"
     environment:
       TZ: Asia/Shanghai
       FNOS_DB_HOST: mysql

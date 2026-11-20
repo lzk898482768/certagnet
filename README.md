@@ -18,7 +18,7 @@ cd /vol1/1000/docker && git clone https://github.com/lzk898482768/certagnet.git 
 ---
 
 - 主程序版本：v2.99.75
-- 部署包版本：v2.99.82
+- 部署包版本：v2.99.83
 - 部署形态：单应用容器（nginx + php-fpm + 定时任务），MySQL 8 与 Redis 7 各自独立容器
 - 默认独立库名：`cert_agent_fnos`（不会读取或覆盖现有 `cert_agent` 数据）
 
@@ -35,7 +35,7 @@ cd /vol1/1000/docker && git clone https://github.com/lzk898482768/certagnet.git 
 | 架构 | x86_64 |
 | 内存 | 建议 ≥ 4 GB（MySQL 占大头；数据量大时上调） |
 | 磁盘 | 建议 ≥ 10 GB 可用空间（镜像 + 数据库 + 附件） |
-| 端口 | 默认 8080/TCP（可改）；如启用了飞牛防火墙，请放行该端口 |
+| 端口 | 默认 18080/TCP（非常用端口，可改）；如启用了飞牛防火墙，请放行该端口，并在路由器做 DDNS 端口映射 |
 
 首次构建需要拉取 `php:8.2-fpm-bookworm`、`mysql:8.0`、`redis:7-alpine`，国内网络建议先在
 飞牛 Docker 设置里配置镜像加速，否则可能拉取缓慢或失败。
@@ -63,7 +63,7 @@ chmod 600 .env
 
 sh deploy-acr.sh            # 用 .env 里的 ACR_TAG
 # 或指定版本：
-sh deploy-acr.sh 2.99.82
+sh deploy-acr.sh 2.99.83
 ```
 
 `deploy-acr.sh` 等价于 `sh install.sh --acr [--tag <版本>]`，会自动完成：
@@ -97,7 +97,7 @@ sh install.sh
 安装完成后会打印授权地址与管理员密码。
 
 > 脚本只负责生成配置和启动容器；授权仍需浏览器访问 `/setup.php` 完成。
-> 如果 8080 端口被占用：先 `cp .env.example .env`，把 `HTTP_PORT` 改成 8081，再执行 `sh install.sh`；
+> 如果默认端口被占用：先 `cp .env.example .env`，把 `HTTP_PORT` 改成其它非常用端口（如 28080），再执行 `sh install.sh`；
 > 也可以安装后修改仓库根目录的 `.env`，再执行 `docker compose up -d`。
 
 下面是手动步骤，适合需要自定义密码或排查问题的场景。
@@ -156,7 +156,7 @@ vi .env
 | `REDIS_PASSWORD` | Redis 密码，不能为空 |
 | `ADMIN_PASS` | 管理员初始密码（≥ 8 位，不能是 `admin123`） |
 | `GOV_PASSWORD_KEY` | 政务网申报密码加密密钥，安装后不可更换 |
-| `HTTP_PORT` | 默认 8080，可按需修改 |
+| `HTTP_PORT` | 默认 18080（非常用端口），可按需修改；只影响访问端口，不影响授权（授权只校验域名） |
 
 > `.env` 含明文密码，不要提交到 Git，也不要发给无关人员。安装完成后请另行备份。
 
@@ -194,7 +194,7 @@ docker compose logs -f app
 浏览器访问：
 
 ```
-http://飞牛IP:8080/setup.php
+http://飞牛IP:18080/setup.php
 ```
 
 按页面提示：
@@ -204,15 +204,16 @@ http://飞牛IP:8080/setup.php
 3. 完成安装。
 
 > **凭证域名必须与访问地址一致**：授权校验只比对域名/IP，不比对端口。
-> 例如凭证写的是 `192.168.1.10`，就必须用 `http://192.168.1.10:8080` 访问；
+> 例如凭证写的是 `192.168.1.10`，就必须用 `http://192.168.1.10:18080` 访问；
 > 用 `localhost` 或其它 IP 会报「当前域名不在授权范围」。
+> 用 DDNS 时，凭证绑定 DDNS 域名即可，端口（如 `:18080`）不参与校验。
 
 ### 6. 登录系统
 
 | 入口 | 地址 |
 |---|---|
-| PC 管理端 | `http://飞牛IP:8080/web/` |
-| 移动端 H5 | `http://飞牛IP:8080/mobile/` |
+| PC 管理端 | `http://飞牛IP:18080/web/` |
+| 移动端 H5 | `http://飞牛IP:18080/mobile/` |
 
 用户名：`.env` 里的 `ADMIN_USER`（默认 `admin`），密码：`ADMIN_PASS`。
 
@@ -310,9 +311,9 @@ docker compose logs -f app
 
 ## 七、常见问题
 
-**1. 8080 端口被占用**
+**1. 默认端口被占用 / 想用其它端口**
 
-修改 `.env` 的 `HTTP_PORT`，然后 `docker compose up -d`。
+修改 `.env` 的 `HTTP_PORT`（默认 18080，避开 80/443/8080），然后重新 `sh deploy-acr.sh`（或 `docker compose up -d`），并同步调整路由器 DDNS 端口映射。
 
 **2. 构建时拉取镜像很慢 / 失败**
 
@@ -479,7 +480,7 @@ git pull
 # ACR_REGISTRY=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com
 # ACR_NAMESPACE=certagent
 # ACR_APP_REPO=certagent
-# ACR_TAG=2.99.82
+# ACR_TAG=2.99.83
 
 docker login crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com --username '你的阿里云账号'
 docker compose -f docker-compose.acr.yml --env-file .env pull
