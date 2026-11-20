@@ -150,48 +150,35 @@ if [ "$MODE" = "acr" ]; then
         log "ACR_TAG 已设置为 $OVERRIDE_TAG"
     fi
 
+    # 默认 ACR 账号（非密钥，可入库）；密码仍只通过环境变量/.env/交互输入
+    ACR_DEFAULT_USERNAME="240623475@qq.com"
+
     # 也允许把凭据写在 .env 中（ACR_USERNAME / ACR_PASSWORD），实现复制后零交互
     if [ -z "${ACR_USERNAME:-}" ]; then
         ACR_USERNAME=$(awk -F= '/^ACR_USERNAME=/{sub(/\r$/,"",$2); print $2; exit}' .env)
     fi
+    [ -z "${ACR_USERNAME:-}" ] && ACR_USERNAME="$ACR_DEFAULT_USERNAME"
     if [ -z "${ACR_PASSWORD:-}" ]; then
         ACR_PASSWORD=$(awk -F= '/^ACR_PASSWORD=/{sub(/\r$/,"",$2); print $2; exit}' .env)
     fi
 
-    # 登录 ACR：优先环境变量；交互终端则提示输入；否则跳过（仓库已设为公开时可直接拉取）
-    if [ -n "${ACR_USERNAME:-}" ]; then
-        if [ -z "${ACR_PASSWORD:-}" ]; then
-            printf '请输入 ACR 访问凭证（用户名 %s）：' "$ACR_USERNAME"
-            stty_restore=""
-            if [ -t 0 ]; then stty -echo; stty_restore=1; fi
-            read -r ACR_PASSWORD
-            [ -n "$stty_restore" ] && stty echo
-            printf '\n'
-        fi
-        log "登录 ACR：$acr_registry（用户 $ACR_USERNAME）"
-        printf '%s' "$ACR_PASSWORD" | docker login "$acr_registry" \
-            --username "$ACR_USERNAME" --password-stdin
-        unset ACR_PASSWORD
-    elif [ -t 0 ]; then
-        printf 'ACR 命名空间 %s 的仓库若为私有，需要先登录。\n' "$acr_namespace"
-        printf '请输入 ACR 用户名（直接回车跳过登录，公开仓库可匿名拉取）：'
-        read -r acr_user
-        if [ -n "$acr_user" ]; then
-            printf '请输入 ACR 访问凭证：'
+    # 密码优先级：环境变量 > .env > 交互输入（隐藏输入，走 --password-stdin，不进日志）
+    if [ -z "${ACR_PASSWORD:-}" ]; then
+        if [ -t 0 ]; then
+            printf '请输入 ACR 访问凭证（账号 %s，输入时不显示）：' "$ACR_USERNAME"
             stty -echo
-            read -r acr_pass
+            read -r ACR_PASSWORD
             stty echo
             printf '\n'
-            log "登录 ACR：$acr_registry（用户 $acr_user）"
-            printf '%s' "$acr_pass" | docker login "$acr_registry" \
-                --username "$acr_user" --password-stdin
-            unset acr_pass
         else
-            log "跳过 ACR 登录，直接尝试拉取"
+            echo "错误：非交互终端且未提供 ACR_PASSWORD。请用 ACR_PASSWORD 环境变量，或在 .env 填写后重试。" >&2
+            exit 1
         fi
-    else
-        log "非交互终端且未提供 ACR_USERNAME/ACR_PASSWORD，跳过登录（公开仓库可直接拉取）"
     fi
+    log "登录 ACR：$acr_registry（账号 $ACR_USERNAME）"
+    printf '%s' "$ACR_PASSWORD" | docker login "$acr_registry" \
+        --username "$ACR_USERNAME" --password-stdin
+    unset ACR_PASSWORD
 
     log "从 ACR 拉取全部镜像（registry=$acr_registry namespace=$acr_namespace）..."
     if ! docker compose -f docker-compose.acr.yml --env-file .env pull; then

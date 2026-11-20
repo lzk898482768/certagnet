@@ -2,8 +2,23 @@
 
 证照到期管理系统的飞牛 fnOS 专用部署包：**独立 GitHub 仓库、独立 MySQL 数据库、独立数据目录**。
 
+---
+
+## ⚡ 一行命令部署（推荐，全程只输一次 ACR 密码）
+
+```bash
+cd /vol1/1000/docker && git clone https://github.com/lzk898482768/certagnet.git cert-expiry-manager-fnos && cd cert-expiry-manager-fnos && sh deploy-acr.sh
+```
+
+- 前提：飞牛已安装并启动 Docker。
+- 运行后只需输入 **一次 ACR 密码**（输入时不显示，属正常），其余密码自动生成、镜像自动拉取、容器自动启动、数据库自动初始化。
+- 已有文件夹升级：`cd cert-expiry-manager-fnos && git pull && sh deploy-acr.sh`
+- 详见同目录 [`快速开始.md`](快速开始.md)。
+
+---
+
 - 主程序版本：v2.99.75
-- 部署包版本：v2.99.81
+- 部署包版本：v2.99.82
 - 部署形态：单应用容器（nginx + php-fpm + 定时任务），MySQL 8 与 Redis 7 各自独立容器
 - 默认独立库名：`cert_agent_fnos`（不会读取或覆盖现有 `cert_agent` 数据）
 
@@ -48,7 +63,7 @@ chmod 600 .env
 
 sh deploy-acr.sh            # 用 .env 里的 ACR_TAG
 # 或指定版本：
-sh deploy-acr.sh 2.99.81
+sh deploy-acr.sh 2.99.82
 ```
 
 `deploy-acr.sh` 等价于 `sh install.sh --acr [--tag <版本>]`，会自动完成：
@@ -464,7 +479,7 @@ git pull
 # ACR_REGISTRY=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com
 # ACR_NAMESPACE=certagent
 # ACR_APP_REPO=certagent
-# ACR_TAG=2.99.81
+# ACR_TAG=2.99.82
 
 docker login crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com --username '你的阿里云账号'
 docker compose -f docker-compose.acr.yml --env-file .env pull
