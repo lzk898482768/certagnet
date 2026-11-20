@@ -1,5 +1,13 @@
 # 更新日志
 
+## v2.99.77 — 支持阿里云 ACR 镜像推送与部署（2026-11-20）
+
+- 新增 `tools/push-acr.sh`：把 `php:8.2-fpm-bookworm`、`mysql:8.0`、`redis:7-alpine` 与应用镜像推送到阿里云 ACR
+- 新增 `docker-compose.acr.yml`：全部镜像从 ACR 拉取，飞牛无需访问 Docker Hub、也无需本地构建
+- `Dockerfile` 支持 `PHP_BASE_IMAGE` 构建参数；默认编排支持 `MYSQL_IMAGE` / `REDIS_IMAGE`
+- `.env.example` 与 README 增加 ACR 命名空间、标签、登录与升级说明
+- 不包含任何账号密码；ACR 凭据只通过环境变量传入
+
 ## v2.99.76 — 修复飞牛「构建」卡在拉取本地镜像（2026-11-20）
 
 - 移除 `docker-compose.yml` 中 app 服务的 `image:` 声明：避免 Compose 构建前先尝试从 Docker Hub 拉取本地镜像名 `cert-expiry-manager-fnos:latest`，导致飞牛「构建」长时间停在 `Pulling`

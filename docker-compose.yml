@@ -10,7 +10,8 @@
 
 services:
   mysql:
-    image: mysql:8.0
+    # 可选：改用阿里云 ACR 中的 mysql 镜像，见 tools/push-acr.sh
+    image: ${MYSQL_IMAGE:-mysql:8.0}
     restart: unless-stopped
     command:
       - --default-authentication-plugin=mysql_native_password
@@ -38,7 +39,8 @@ services:
         max-file: "3"
 
   redis:
-    image: redis:7-alpine
+    # 可选：改用阿里云 ACR 中的 redis 镜像，见 tools/push-acr.sh
+    image: ${REDIS_IMAGE:-redis:7-alpine}
     restart: unless-stopped
     command: ["sh", "-ec", 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
     environment:
@@ -62,6 +64,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # 可选：改用阿里云 ACR 中的 php 基础镜像
+        PHP_BASE_IMAGE: ${PHP_BASE_IMAGE:-php:8.2-fpm-bookworm}
     # 不要在这里写 image: cert-expiry-manager-fnos:latest。
     # Compose 同时看到 image + build 时，会先尝试从 Docker Hub 拉取这个本地镜像名，
     # 飞牛「构建」会长时间卡在 “Image ... Pulling”。镜像名交给 Compose 自动生成即可。

@@ -10,7 +10,9 @@
 #     均随源码分发，构建时无需联网执行 composer / npm。
 #   - OPcache 关闭时间戳校验（与生产一致），修改 PHP 代码后必须重建镜像。
 #
-FROM php:8.2-fpm-bookworm
+# 基础镜像可通过构建参数切换为阿里云 ACR，避免构建机访问 Docker Hub
+ARG PHP_BASE_IMAGE=php:8.2-fpm-bookworm
+FROM ${PHP_BASE_IMAGE}
 
 ENV TZ=Asia/Shanghai \
     DEBIAN_FRONTEND=noninteractive

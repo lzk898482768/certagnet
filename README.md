@@ -3,7 +3,7 @@
 证照到期管理系统的飞牛 fnOS 专用部署包：**独立 Gitee 仓库、独立 MySQL 数据库、独立数据目录**。
 
 - 主程序版本：v2.99.75
-- 部署包版本：v2.99.76
+- 部署包版本：v2.99.77
 - 部署形态：单应用容器（nginx + php-fpm + 定时任务），MySQL 8 与 Redis 7 各自独立容器
 - 默认独立库名：`cert_agent_fnos`（不会读取或覆盖现有 `cert_agent` 数据）
 
@@ -351,7 +351,8 @@ v2.99.76 已删除 `image:` 声明，镜像名由 Compose 自动生成。若暂�
 ```
 .
 ├── Dockerfile                 # 应用镜像（nginx + php-fpm + scheduler）
-├── docker-compose.yml         # app / mysql / redis
+├── docker-compose.yml         # app / mysql / redis（本地构建）
+├── docker-compose.acr.yml     # 可选：全部镜像从阿里云 ACR 拉取
 ├── install.sh                 # 一键安装（生成 .env + docker compose up -d --build）
 ├── .env.example               # 环境变量模板
 ├── docker/
@@ -365,7 +366,9 @@ v2.99.76 已删除 `image:` 声明，镜像名由 Compose 自动生成。若暂�
 │   ├── php-fpm.conf           # clear_env=no 等
 │   └── supervisord.conf       # 进程托管
 ├── backend/                   # 主程序（含 vendor 与前端构建产物）
-└── tools/sync-from-main.mjs   # 从主仓库同步 backend
+└── tools/
+    ├── push-acr.sh            # 把镜像推送到阿里云 ACR
+    └── sync-from-main.mjs     # 从主仓库同步 backend
 ```
 
 ---
@@ -380,3 +383,73 @@ node tools/sync-from-main.mjs /path/to/cert-expiry-manager
 
 脚本会用主仓库当前提交的 `backend/` 覆盖本仓库 `backend/`，并更新 `VERSION`。
 检查差异后提交、打标签即可。
+
+---
+
+## 十一、使用阿里云 ACR（可选）
+
+如果飞牛访问 Docker Hub 很慢或失败，可以先把镜像推送到阿里云容器镜像服务（ACR）。
+两种用法，任选一种。
+
+### 方式 A：全部镜像从 ACR 拉取，飞牛不构建（推荐）
+
+先在**能访问 Docker Hub 的 x86_64 构建机**上执行（首次拉基础镜像需要 Docker Hub）：
+
+```bash
+git clone git@gitee.com:kxunyun/cert-expiry-manager-fnos.git
+cd cert-expiry-manager-fnos
+
+export ACR_REGISTRY=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com
+export ACR_NAMESPACE=你的ACR命名空间
+export ACR_USERNAME='你的阿里云账号'
+read -s ACR_PASSWORD && export ACR_PASSWORD
+
+sh tools/push-acr.sh
+```
+
+脚本会推送：
+
+- `php:8.2-fpm-bookworm`
+- `mysql:8.0`
+- `redis:7-alpine`
+- `cert-expiry-manager-fnos:<VERSION>` 与 `:latest`
+
+然后在飞牛上：
+
+```bash
+cd /vol1/1000/docker/cert-expiry-manager-fnos
+git pull
+
+# 在 .env 里增加（模板见 .env.example）：
+# ACR_REGISTRY=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com
+# ACR_NAMESPACE=你的ACR命名空间
+# ACR_TAG=2.99.77
+
+docker login crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com --username '你的阿里云账号'
+docker compose -f docker-compose.acr.yml --env-file .env pull
+docker compose -f docker-compose.acr.yml --env-file .env up -d
+```
+
+升级时，在构建机重新推送新版本，把飞牛 `.env` 的 `ACR_TAG` 改成新版本，再执行
+`docker compose -f docker-compose.acr.yml pull && docker compose -f docker-compose.acr.yml up -d`。
+
+### 方式 B：只用 ACR 基础镜像，飞牛仍本地构建
+
+构建机同样先执行 `tools/push-acr.sh`（至少推送 php / mysql / redis），然后在飞牛 `.env` 中设置：
+
+```ini
+PHP_BASE_IMAGE=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com/<命名空间>/php:8.2-fpm-bookworm
+MYSQL_IMAGE=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com/<命名空间>/mysql:8.0
+REDIS_IMAGE=crpi-e8ivxiujwrjswkb4.cn-beijing.personal.cr.aliyuncs.com/<命名空间>/redis:7-alpine
+```
+
+之后仍执行 `docker compose up -d --build`。
+
+注意事项：
+
+- `ACR_NAMESPACE` 是 ACR 控制台里创建的命名空间，不是登录用户名；首次推送前先创建。
+- ACR 个人版默认私有仓库，飞牛必须先 `docker login` 才能拉取。
+- 如果构建机也访问不了 Docker Hub，先在 ACR 控制台使用「镜像同步/镜像加速」导入基础镜像，
+  或让构建机走代理；`push-acr.sh` 本身无法凭空下载镜像。
+- 不要把 ACR 用户名/密码写进仓库；建议为本项目单独创建只具备推送权限的 RAM 用户。
+- ACR 个人版可能有存储/流量限制，推送前确认套餐余量。
