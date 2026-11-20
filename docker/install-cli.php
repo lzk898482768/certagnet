@@ -84,6 +84,9 @@ function fnos_write_env(array $cfg): bool
             $env .= $name . ' = ' . installEnvValue((string)$cfg[$key]) . "\n";
         }
         $env .= "\n[GOV]\nPASSWORD_KEY = " . installEnvValue((string)$cfg['gov_key']) . "\n";
+        // 飞牛版关闭页面「在线升级」：代码在镜像层内，升级统一 git pull + 重建镜像。
+        // compose 同时注入 PHP_UPGRADE_ENABLED=0，兼容升级前已生成的旧 .env。
+        $env .= "\n[UPGRADE]\nENABLED = \"false\"\n";
     } catch (InvalidArgumentException $e) {
         fwrite(STDERR, "[fnos] 配置值无法安全写入 .env：{$e->getMessage()}\n");
         return false;

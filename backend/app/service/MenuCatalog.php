@@ -270,6 +270,23 @@ class MenuCatalog
             // 菜单自愈失败不应阻断登录等主流程，交由日志排查
         }
 
+        // ③.4 飞牛版关闭在线升级时，强制隐藏菜单 74。
+        //     前端路由按菜单鉴权，菜单不可见时直接输入 /upgrade 也会被拦回。
+        //     每次 ensureSchema 都执行（不受 VERSION 门控），防止被手工重新启用。
+        if (!UpgradeService::enabled()) {
+            try {
+                $changed = Db::name('sys_menu')
+                    ->where('id', 74)
+                    ->where('status', 1)
+                    ->update(['status' => 0]);
+                if ($changed) {
+                    self::flushThrottle();
+                }
+            } catch (\Throwable $e) {
+                // 菜单隐藏失败不阻断登录；接口层仍会拒绝升级请求
+            }
+        }
+
         // ③.5 v2.62：政务网进度菜单一次性补授权
         //      RoleCatalog::ensure() 对已存在角色不改 menu_ids，故必须显式补。
         //      仅授权业务岗位（不含 company / finance），执行一次后写标记，

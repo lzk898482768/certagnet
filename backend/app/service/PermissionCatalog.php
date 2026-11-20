@@ -28,7 +28,7 @@ class PermissionCatalog
      */
     public static function modules(): array
     {
-        return [
+        $modules = [
             'cert' => ['label' => '证照台账', 'menu' => 5, 'actions' => [
                 'create' => '新增', 'edit' => '编辑', 'delete' => '删除',
                 'export' => '导出', 'import' => '导入', 'status' => '状态变更',
@@ -172,6 +172,13 @@ class PermissionCatalog
                 'save' => '保存配置', 'token' => '重置接入Token', 'audit' => '审核模式',
             ]],
         ];
+
+        // 飞牛版关闭在线升级时，功能权限目录同步移除，角色授权页不再展示。
+        if (!UpgradeService::enabled()) {
+            unset($modules['upgrade']);
+        }
+
+        return $modules;
     }
 
     /** 某模块的全部权限码 */

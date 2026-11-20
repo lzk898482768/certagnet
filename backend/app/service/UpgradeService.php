@@ -4,7 +4,7 @@ namespace app\service;
 use think\facade\Config;
 
 /**
- * 在线升级服务（v2.99.73）
+ * 在线升级服务（v2.99.74）
  *
  * 能力：
  *  - 读取 Gitee 仓库最新版本标签，与当前版本比较；
@@ -20,13 +20,29 @@ use think\facade\Config;
 class UpgradeService
 {
     /** 当前系统版本（与 CHANGELOG 对齐） */
-    public const CURRENT_VERSION = 'v2.99.73';
+    public const CURRENT_VERSION = 'v2.99.74';
 
     /** 最近一次 zipDir 的失败原因（用于升级提示） */
     private static $zipError = '';
 
     /** Gitee Release 列表（tag => release），单次请求内缓存，避免跨版本汇总时 N 次请求 */
     private static $releaseIndex = null;
+
+    /**
+     * 是否允许页面「在线升级」。
+     *
+     * 飞牛 fnOS 版通过 [UPGRADE] ENABLED=false 或 PHP_UPGRADE_ENABLED=0 关闭：
+     * 代码在镜像层内，页面升级替换容器文件会与镜像版本不一致，统一改用
+     * git pull + docker compose up -d --build。
+     */
+    public static function enabled(): bool
+    {
+        $v = env('upgrade.enabled', true);
+        if (is_bool($v)) {
+            return $v;
+        }
+        return !in_array(strtolower(trim((string)$v)), ['0', 'false', 'off', 'no'], true);
+    }
 
     /** 读取最近一次打包失败原因 */
     public static function lastZipError(): string

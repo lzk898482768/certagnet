@@ -83,10 +83,12 @@ services:
       FNOS_ADMIN_NAME: ${ADMIN_NAME:-系统管理员}
       # 政务网申报密码加密密钥，安装后不可更换（更换会导致已保存密码无法解密）
       PHP_GOV_PASSWORD_KEY: ${GOV_PASSWORD_KEY:?请在 .env 中设置 GOV_PASSWORD_KEY}
+      # 飞牛版关闭页面「在线升级」：代码在镜像层内，升级统一 git pull + 重建镜像
+      PHP_UPGRADE_ENABLED: "0"
     volumes:
       # 配置（.env）与安装锁在容器重建后保留
       - ./data/config:/data/config
-      # 运行日志、备份、在线升级工作区、授权文件（runtime/vault）
+      # 运行日志、备份、升级工作区、授权文件（runtime/vault）
       - ./data/runtime:/var/www/backend/runtime
       # 上传附件
       - ./data/uploads:/var/www/backend/public/uploads

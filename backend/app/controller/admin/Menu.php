@@ -3,6 +3,7 @@ namespace app\controller\admin;
 
 use app\model\SysMenu;
 use app\service\MenuCatalog;
+use app\service\UpgradeService;
 
 class Menu extends AdminController
 {
@@ -10,7 +11,7 @@ class Menu extends AdminController
     {
         $this->requireAdmin();
         MenuCatalog::ensureSchema();
-        $list = SysMenu::order('sort', 'asc')->select()->toArray();
+        $list = $this->hideUpgradeIfDisabled(SysMenu::order('sort', 'asc')->select()->toArray());
         return json(r_success(SysMenu::buildTree($list)));
     }
 
@@ -23,7 +24,7 @@ class Menu extends AdminController
     {
         $this->requireAdmin();
         MenuCatalog::ensureSchema();
-        $list = SysMenu::order('sort', 'asc')->select()->toArray();
+        $list = $this->hideUpgradeIfDisabled(SysMenu::order('sort', 'asc')->select()->toArray());
         if ((int)$this->request->param('with_groups', 0) !== 1) {
             return json(r_success($list));
         }
@@ -77,7 +78,7 @@ class Menu extends AdminController
         // 否则「重置」只修菜单表、不修角色表，功能仍然看不见。
         $repaired = $this->repairOrphanMenus();
         $this->log('菜单', '重置架构', MenuCatalog::VERSION . ($repaired ? "，修复孤儿授权 {$repaired} 项" : ''));
-        $list = SysMenu::order('sort', 'asc')->select()->toArray();
+        $list = $this->hideUpgradeIfDisabled(SysMenu::order('sort', 'asc')->select()->toArray());
         return json(r_success([
             'list'         => $list,
             'groups'       => MenuCatalog::groupStat(),
@@ -85,6 +86,17 @@ class Menu extends AdminController
             'repaired'     => $repaired,
         ], '菜单架构已重置为 ' . MenuCatalog::VERSION
             . ($repaired > 0 ? "，并修复 {$repaired} 项孤儿菜单授权" : '')));
+    }
+
+    /** 飞牛版关闭在线升级时，菜单管理 / 角色授权树不展示 74 号菜单 */
+    private function hideUpgradeIfDisabled(array $list): array
+    {
+        if (UpgradeService::enabled()) {
+            return $list;
+        }
+        return array_values(array_filter($list, static function ($m) {
+            return (int)($m['id'] ?? 0) !== 74;
+        }));
     }
 
     /**

@@ -19,6 +19,17 @@ use app\service\UpgradeService;
  */
 class Upgrade extends AdminController
 {
+    /**
+     * 飞牛版关闭在线升级：所有接口返回 404，避免绕过菜单直接调用。
+     */
+    private function disabled()
+    {
+        if (UpgradeService::enabled()) {
+            return null;
+        }
+        return json(r_error('飞牛版已关闭在线升级', 404));
+    }
+
     protected function boot(): void
     {
         UpgradeService::ensureDirs();
@@ -26,6 +37,9 @@ class Upgrade extends AdminController
 
     public function info()
     {
+        if ($blocked = $this->disabled()) {
+            return $blocked;
+        }
         $this->boot();
         if (!$this->can('upgrade', 'view')) {
             return json(r_error('无查看在线升级权限', 403));
@@ -35,6 +49,9 @@ class Upgrade extends AdminController
 
     public function check()
     {
+        if ($blocked = $this->disabled()) {
+            return $blocked;
+        }
         $this->boot();
         if (!$this->can('upgrade', 'run')) {
             return json(r_error('无执行升级权限', 403));
@@ -64,6 +81,9 @@ class Upgrade extends AdminController
 
     public function backup()
     {
+        if ($blocked = $this->disabled()) {
+            return $blocked;
+        }
         $this->boot();
         if (!$this->can('upgrade', 'run')) {
             return json(r_error('无执行升级权限', 403));
@@ -77,6 +97,9 @@ class Upgrade extends AdminController
 
     public function download()
     {
+        if ($blocked = $this->disabled()) {
+            return $blocked;
+        }
         $this->boot();
         if (!$this->can('upgrade', 'run')) {
             return json(r_error('无执行升级权限', 403));
@@ -118,6 +141,9 @@ class Upgrade extends AdminController
     /** 升级进度（前端轮询展示） */
     public function progress()
     {
+        if ($blocked = $this->disabled()) {
+            return $blocked;
+        }
         $this->boot();
         if (!$this->can('upgrade', 'view')) {
             return json(r_error('无查看在线升级权限', 403));
@@ -127,6 +153,9 @@ class Upgrade extends AdminController
 
     public function upload()
     {
+        if ($blocked = $this->disabled()) {
+            return $blocked;
+        }
         $this->boot();
         if (!$this->can('upgrade', 'run')) {
             return json(r_error('无执行升级权限', 403));
@@ -153,6 +182,9 @@ class Upgrade extends AdminController
 
     public function apply()
     {
+        if ($blocked = $this->disabled()) {
+            return $blocked;
+        }
         $this->boot();
         if (!$this->can('upgrade', 'run')) {
             return json(r_error('无执行升级权限', 403));
@@ -185,6 +217,9 @@ class Upgrade extends AdminController
 
     public function restore()
     {
+        if ($blocked = $this->disabled()) {
+            return $blocked;
+        }
         $this->boot();
         if (!$this->can('upgrade', 'run')) {
             return json(r_error('无执行升级权限', 403));
@@ -205,6 +240,9 @@ class Upgrade extends AdminController
     /** 删除备份文件（仅允许 runtime/backup 下的合法备份名） */
     public function deleteBackup()
     {
+        if ($blocked = $this->disabled()) {
+            return $blocked;
+        }
         $this->boot();
         if (!$this->can('upgrade', 'run')) {
             return json(r_error('无执行升级权限', 403));
