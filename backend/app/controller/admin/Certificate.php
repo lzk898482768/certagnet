@@ -12,6 +12,7 @@ use app\service\CustomFieldService;
 use app\service\CrmService;
 use app\service\HnPersonCollectService;
 use app\service\MemPersonCollectService;
+use app\service\MohurdCollectService;
 use think\facade\Db;
 
 class Certificate extends AdminController
@@ -425,6 +426,21 @@ class Certificate extends AdminController
                 ->where('cert_no', $certNo)
                 ->order('id', 'desc')
                 ->find();
+            // v2.99.90：住建部新采集按专业拆条，同一本建造师证（同编号）的不同专业应分别建档、
+            // 各带独立有效期。若同编号存量证书与当前证书没有任何专业重叠，说明是另一专业，
+            // 不算重复录入，放行新建；只要有一个专业相同仍按重复处理，避免同专业重复建档。
+            if ($dupByNo && $certName !== '') {
+                $overlap = false;
+                foreach (\app\service\CertDictService::splitNames($certName) as $one) {
+                    if (\app\service\CertDictService::hasName((string)$dupByNo['cert_name'], $one)) {
+                        $overlap = true;
+                        break;
+                    }
+                }
+                if (!$overlap) {
+                    $dupByNo = null;
+                }
+            }
             // v2.99.79：多专业证书按「专业集合」比较，顺序不同也视为重复
             $dupByName = null;
             if ($certName !== '') {
@@ -826,6 +842,25 @@ class Certificate extends AdminController
                 return json(r_error($e->getMessage(), 400));
             }
             return json(r_success($result, '应急厅查询平台要求图形验证码，请人工输入后继续采集'));
+        }
+
+        // v2.99.90：建造师（注册建造师）改走住建部四库一平台，免验证码、分专业独立有效期。
+        // 安管 / 技工 / 建设厅特种工等仍走河南省平台（带图形验证码）。
+        if (MohurdCollectService::supports($certType)) {
+            try {
+                $result = MohurdCollectService::collect(
+                    $staffId,
+                    $idCard,
+                    $certType,
+                    $certName
+                );
+            } catch (\Throwable $e) {
+                return json(r_error($e->getMessage(), 400));
+            }
+            $msg = $result['candidates']
+                ? '采集成功（来源：住建部四库一平台）'
+                : ($result['message'] ?: '住建部平台未查询到该人员的建造师注册信息');
+            return json(r_success($result, $msg));
         }
 
         $ep = HnPersonCollectService::resolveEndpoint($certType, $certName);
