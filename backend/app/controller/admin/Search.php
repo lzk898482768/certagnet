@@ -558,7 +558,21 @@ class Search extends AdminController
             $q->whereExists(function ($sub) use ($certName, $category, $social, $match) {
                 $sub->table('certificate')->whereColumn('certificate.staff_id', 'staff.id');
                 if ($certName) {
-                    $sub->where('cert_name', $match === 'exact' ? $certName : 'like', $match === 'exact' ? null : "%{$certName}%");
+                    if ($match === 'exact') {
+                        // v2.99.79：多专业证书按拆分后的完整专业名命中，避免子串误判
+                        $names = \app\service\CertDictService::splitNames($certName) ?: [$certName];
+                        $sub->where(function ($w2) use ($names) {
+                            foreach ($names as $i => $one) {
+                                if ($i === 0) {
+                                    $w2->whereRaw("CONCAT('、', cert_name, '、') LIKE ?", ['%、' . $one . '、%']);
+                                } else {
+                                    $w2->whereOrRaw("CONCAT('、', cert_name, '、') LIKE ?", ['%、' . $one . '、%']);
+                                }
+                            }
+                        });
+                    } else {
+                        $sub->where('cert_name', 'like', "%{$certName}%");
+                    }
                 }
                 if ($category) {
                     $sub->where('category', $category);

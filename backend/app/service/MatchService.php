@@ -60,9 +60,15 @@ class MatchService
         $certQuery = Db::name('certificate')->alias('cert')
             ->where('cert.cert_status', 1)
             ->where(function ($w) use ($reqName, $reqNameN, $reqCat, $reqCatN, $hasCat, $hasCore, $core) {
-                $w->where('cert.cert_name', $reqName);
+                // v2.99.79：证书专业可多值（「建筑工程、市政公用工程」），
+                // 用「、名称、」包裹后 LIKE 精确命中单个专业，兼容单值与多值。
+                if ($reqName !== '') {
+                    $w->whereRaw("CONCAT('、', cert.cert_name, '、') LIKE ?", ['%、' . $reqName . '、%']);
+                } else {
+                    $w->where('cert.cert_name', '');
+                }
                 if ($reqNameN !== '' && $reqNameN !== $reqName) {
-                    $w->whereOr('cert.cert_name', $reqNameN);
+                    $w->whereOrRaw("CONCAT('、', cert.cert_name, '、') LIKE ?", ['%、' . $reqNameN . '、%']);
                 }
                 if ($hasCat) {
                     $w->whereOr('cert.category', $reqCat)
@@ -150,8 +156,8 @@ class MatchService
         $blocked  = false;
         $conflicts = [];
 
-        // ① 证书匹配 40
-        $exact = ((string)$cert['cert_name'] === (string)$req['cert_name']);
+        // ① 证书匹配 40（v2.99.79：多专业证书任一专业与需求相同即视为精确匹配）
+        $exact = CertDictService::hasName((string)($cert['cert_name'] ?? ''), (string)($req['cert_name'] ?? ''));
         if ($exact) {
             $score += self::W_CERT;
             $detail['证书专业精确匹配'] = (int)self::W_CERT;
@@ -258,12 +264,24 @@ class MatchService
         if (!$req) {
             return [];
         }
+        $reqName = trim((string)($req['cert_name'] ?? ''));
+        $reqCat  = trim((string)($req['cert_category'] ?? ''));
         $cert = Db::name('certificate')->where('staff_id', $staffId)
             ->where('cert_status', 1)
-            ->where(function ($w) use ($req) {
-                $w->where('cert_name', trim((string)$req['cert_name']));
-                if (!empty($req['cert_category'])) {
-                    $w->whereOr('category', trim((string)$req['cert_category']));
+            ->where(function ($w) use ($reqName, $reqCat) {
+                // v2.99.79：多专业证书按单个专业名精确命中
+                if ($reqName !== '') {
+                    $w->whereRaw("CONCAT('、', cert_name, '、') LIKE ?", ['%、' . $reqName . '、%']);
+                }
+                if ($reqCat !== '') {
+                    if ($reqName !== '') {
+                        $w->whereOr('category', $reqCat);
+                    } else {
+                        $w->where('category', $reqCat);
+                    }
+                }
+                if ($reqName === '' && $reqCat === '') {
+                    $w->whereRaw('1=0');
                 }
             })
             ->orderRaw('expire_date IS NULL ASC, expire_date ASC')->find();

@@ -138,10 +138,20 @@ class ExamSignupService
         if ($staffId > 0 && $certTypeId > 0) {
             $certName = (string)Db::name('exam_cert_type')->where('id', $certTypeId)->value('name');
             if ($certName !== '') {
-                $ledger = Db::name('certificate')
+                // v2.99.79：多专业证书按单个专业名匹配，避免「建筑工程、市政公用工程」漏配
+                $ledger = null;
+                $ledgerRows = Db::name('certificate')
                     ->where('staff_id', $staffId)
-                    ->where('cert_name', $certName)
-                    ->order('expire_date desc,id desc')->find();
+                    ->where('cert_name', '<>', '')
+                    ->order('expire_date desc,id desc')
+                    ->field('cert_name,expire_date')
+                    ->select()->toArray();
+                foreach ($ledgerRows as $ledgerRow) {
+                    if (CertDictService::hasName((string)$ledgerRow['cert_name'], $certName)) {
+                        $ledger = $ledgerRow;
+                        break;
+                    }
+                }
                 if ($ledger) {
                     $certExpire = (string)($ledger['expire_date'] ?? '');
                     if ($certStatus === '') {

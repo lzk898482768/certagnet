@@ -499,7 +499,10 @@ class HnPersonCollectService
             $specialty = (string)($row['specialtytypnum'] ?? '');
             $typeMap = ['81' => '一级建造师', '82' => '二级建造师'];
             $certType = $typeMap[$specialty] ?? $requestedType;
-            $certName = self::clean((string)($row['zczy'] ?? '')) ?: $requestedName;
+            // v2.99.89：同一本建造师证书可注册多个专业，平台 zczy 可能用逗号/分号/空格连接；
+            // 统一规范化为「、」，前端再按新增/编辑场景处理勾选与默认值。
+            $certName = self::normalizeMajorNames((string)($row['zczy'] ?? ''))
+                ?: self::normalizeMajorNames($requestedName);
             $certNo = self::clean((string)($row['ecertnum'] ?? '')) ?: self::clean((string)($row['stampnum'] ?? ''));
             $expire = self::normDate((string)($row['effectdate'] ?? ''));
             $company = self::clean((string)($row['corpname'] ?? ''));
@@ -680,6 +683,28 @@ class HnPersonCollectService
     {
         $v = str_replace(["\xc2\xa0", "\u{3000}"], ' ', $v);
         return trim(preg_replace('/\s+/u', ' ', $v) ?? '');
+    }
+
+    /**
+     * 建造师注册专业规范化（v2.99.89）
+     * 平台 zczy 可能返回「建筑工程,市政公用工程」「建筑工程；机电工程」等多专业写法，
+     * 统一为台账存储口径「建筑工程、市政公用工程」，并去空、去重。
+     */
+    private static function normalizeMajorNames(string $v): string
+    {
+        $v = self::clean($v);
+        if ($v === '') {
+            return '';
+        }
+        $parts = preg_split('/[、,，;；|\/]+/u', $v) ?: [];
+        $out = [];
+        foreach ($parts as $p) {
+            $p = trim($p);
+            if ($p !== '' && !in_array($p, $out, true)) {
+                $out[] = $p;
+            }
+        }
+        return implode('、', $out);
     }
 
     private static function normDate(string $v): string

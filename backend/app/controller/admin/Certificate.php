@@ -376,9 +376,13 @@ class Certificate extends AdminController
         }
         // v2.78：类型/专业组合校验。专业若已登记在字典中，必须归属所选类型；
         // 类型为空且专业归属唯一时自动补全，避免「专业挂错类型」的脏数据。
-        $pair = \app\service\CertDictService::normalizePair($certTypeVal, (string)($data['cert_name'] ?? ''));
+        // v2.99.79：建造师证书支持一本证书多个专业，逐项校验并统一为「、」连接。
+        $pair = \app\service\CertDictService::normalizePairMulti($certTypeVal, (string)($data['cert_name'] ?? ''));
         if ($pair['error'] !== '') {
             return json(r_error($pair['error'], 400));
+        }
+        if ($pair['name'] !== '') {
+            $data['cert_name'] = $pair['name'];
         }
         if ($pair['type'] !== '') {
             $data['cert_type'] = $pair['type'];
@@ -421,10 +425,20 @@ class Certificate extends AdminController
                 ->where('cert_no', $certNo)
                 ->order('id', 'desc')
                 ->find();
-            $dupByName = CertificateModel::where('staff_id', (int)$data['staff_id'])
-                ->where('cert_name', $certName)
-                ->order('id', 'desc')
-                ->find();
+            // v2.99.79：多专业证书按「专业集合」比较，顺序不同也视为重复
+            $dupByName = null;
+            if ($certName !== '') {
+                $nameRows = CertificateModel::where('staff_id', (int)$data['staff_id'])
+                    ->where('cert_name', '<>', '')
+                    ->order('id', 'desc')
+                    ->select();
+                foreach ($nameRows as $nameRow) {
+                    if (\app\service\CertDictService::sameNames((string)$nameRow['cert_name'], $certName)) {
+                        $dupByName = $nameRow;
+                        break;
+                    }
+                }
+            }
             if ($dupByNo || $dupByName) {
                 $dupCert = $dupByNo ?: $dupByName;
                 $fields = [];

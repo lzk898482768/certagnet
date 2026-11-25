@@ -132,12 +132,14 @@ class ConflictService
         // ③ 互斥冲突：同一人互斥组内其他证书正被占用
         foreach (self::exclusiveGroupsOf((string)$cert['cert_name']) as $g) {
             $members = $g['members'];
-            $others = Db::name('certificate')
-                ->where('staff_id', $cert['staff_id'])
-                ->where('id', '<>', $certId)
-                ->whereIn('cert_name', $members)
-                ->where('cert_status', 1)
-                ->select()->toArray();
+            $others = self::whereAnyCertName(
+                Db::name('certificate')
+                    ->where('staff_id', $cert['staff_id'])
+                    ->where('id', '<>', $certId)
+                    ->where('cert_status', 1),
+                'cert_name',
+                $members
+            )->select()->toArray();
             foreach ($others as $o) {
                 $busyO = Db::name('cert_secondment')->alias('s')
                     ->leftJoin('client_company c', 'c.id = s.company_id')
@@ -253,9 +255,13 @@ class ConflictService
         // 互斥冲突
         foreach ($certs as $cert) {
             foreach (self::exclusiveGroupsOf((string)$cert['cert_name']) as $g) {
-                $others = Db::name('certificate')
-                    ->where('staff_id', $staffId)->where('id', '<>', $cert['id'])
-                    ->whereIn('cert_name', $g['members'])->where('cert_status', 1)->select()->toArray();
+                $others = self::whereAnyCertName(
+                    Db::name('certificate')
+                        ->where('staff_id', $staffId)->where('id', '<>', $cert['id'])
+                        ->where('cert_status', 1),
+                    'cert_name',
+                    $g['members']
+                )->select()->toArray();
                 foreach ($others as $o) {
                     $busyO = Db::name('cert_secondment')->alias('s')
                         ->leftJoin('client_company c', 'c.id = s.company_id')
@@ -400,8 +406,10 @@ class ConflictService
         }
         try {
             foreach (Db::name('certificate')->distinct(true)->column('cert_name') as $n) {
-                $n = trim((string)$n);
-                if ($n !== '') { $names[$n] = 1; }
+                // v2.99.79：多专业证书拆成独立专业名，供互斥组按单个专业配置
+                foreach (CertDictService::splitNames((string)$n) as $one) {
+                    $names[$one] = 1;
+                }
             }
         } catch (\Throwable $e) {
             // 忽略
@@ -540,13 +548,15 @@ class ConflictService
         if (!$type || $type === self::T_EXCLUSIVE) {
             foreach ($exGroups as $g) {
                 if (!$g['members']) { continue; }
-                $rows = Db::name('certificate')->alias('cert')
-                    ->leftJoin('cert_secondment s', 's.cert_id = cert.id AND s.status = 1')
-                    ->field('cert.id,cert.staff_id,cert.cert_name,cert.cert_no,s.id AS secondment_id,s.end_date')
-                    ->whereIn('cert.cert_name', $g['members'])
-                    ->where('cert.cert_status', 1)
-                    ->where('s.id', '>', 0)
-                    ->order('cert.staff_id', 'asc')->select()->toArray();
+                $rows = self::whereAnyCertName(
+                    Db::name('certificate')->alias('cert')
+                        ->leftJoin('cert_secondment s', 's.cert_id = cert.id AND s.status = 1')
+                        ->field('cert.id,cert.staff_id,cert.cert_name,cert.cert_no,s.id AS secondment_id,s.end_date')
+                        ->where('cert.cert_status', 1)
+                        ->where('s.id', '>', 0),
+                    'cert.cert_name',
+                    $g['members']
+                )->order('cert.staff_id', 'asc')->select()->toArray();
                 // 同一人员组内占用数 >= 2 即互斥冲突
                 $byStaff = [];
                 foreach ($rows as $r) { $byStaff[(int)$r['staff_id']][] = $r; }
@@ -804,20 +814,46 @@ class ConflictService
 
     /**
      * 取包含指定证书专业名的互斥组
+     * v2.99.79：一本证书可登记多个专业，任一专业命中互斥组即算命中
      * @return array [['id'=>int,'group_name'=>string,'members'=>array]]
      */
     public static function exclusiveGroupsOf(string $certName): array
     {
-        if ($certName === '') {
+        $names = CertDictService::splitNames($certName);
+        if (!$names) {
             return [];
         }
         $out = [];
         foreach (self::allExclusiveGroups() as $g) {
-            if (in_array($certName, $g['members'], true)) {
+            if (array_intersect($names, $g['members'])) {
                 $out[] = $g;
             }
         }
         return $out;
+    }
+
+    /**
+     * 给查询追加「证书专业列包含任一完整专业名」的条件（v2.99.79）
+     * 列内多专业以「、」分隔，前后补分隔符避免子串误判。
+     */
+    private static function whereAnyCertName($query, string $column, array $names)
+    {
+        $names = array_values(array_filter(array_map('trim', $names), fn($n) => $n !== ''));
+        return $query->where(function ($w) use ($column, $names) {
+            if (!$names) {
+                $w->whereRaw('1=0');
+                return;
+            }
+            foreach ($names as $i => $n) {
+                $sql  = "CONCAT('、', {$column}, '、') LIKE ?";
+                $bind = ['%、' . $n . '、%'];
+                if ($i === 0) {
+                    $w->whereRaw($sql, $bind);
+                } else {
+                    $w->whereOrRaw($sql, $bind);
+                }
+            }
+        });
     }
 
     /**

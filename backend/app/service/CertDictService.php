@@ -145,6 +145,108 @@ class CertDictService
         ];
     }
 
+    /**
+     * 拆分「多专业」字符串（v2.99.79）
+     *
+     * 建造师证书可在同一本证书上登记多个专业，台账统一用「、」存储；
+     * 同时兼容平台/导入数据里的 , ， ; ； | 等分隔符，去空并去重。
+     *
+     * @return array<int,string>
+     */
+    public static function splitNames(string $names): array
+    {
+        $names = trim($names);
+        if ($names === '') {
+            return [];
+        }
+        $parts = preg_split('/[、,，;；|]+/u', $names) ?: [];
+        $out = [];
+        foreach ($parts as $p) {
+            $p = trim($p);
+            if ($p !== '' && !in_array($p, $out, true)) {
+                $out[] = $p;
+            }
+        }
+        return $out;
+    }
+
+    /** 多专业数组 → 存储字符串（去空、去重，固定用「、」连接） */
+    public static function joinNames(array $names): string
+    {
+        $clean = [];
+        foreach ($names as $n) {
+            foreach (self::splitNames((string)$n) as $one) {
+                if (!in_array($one, $clean, true)) {
+                    $clean[] = $one;
+                }
+            }
+        }
+        return implode('、', $clean);
+    }
+
+    /** 多专业字符串是否包含指定专业（按拆分后的完整名称匹配，避免「建筑工程」误中「建筑工程管理」） */
+    public static function hasName(string $names, string $needle): bool
+    {
+        $needle = trim($needle);
+        if ($needle === '') {
+            return false;
+        }
+        return in_array($needle, self::splitNames($names), true);
+    }
+
+    /** 两个多专业字符串的专业集合是否相同（忽略顺序） */
+    public static function sameNames(string $a, string $b): bool
+    {
+        $aa = self::splitNames($a);
+        $bb = self::splitNames($b);
+        sort($aa);
+        sort($bb);
+        return $aa === $bb;
+    }
+
+    /**
+     * 多专业组合校验（v2.99.79）
+     *
+     * 与 normalizePair 同口径逐个专业校验；所有专业必须归属同一个证书类型。
+     * 返回的 name 已规范为「、」连接，供保存时直接落库。
+     *
+     * @return array{type:string,name:string,error:string}
+     */
+    public static function normalizePairMulti(string $type, string $name): array
+    {
+        $type = trim($type);
+        $list = self::splitNames($name);
+        if (!$list) {
+            return ['type' => $type, 'name' => '', 'error' => ''];
+        }
+        $resolved = $type;
+        $clean = [];
+        foreach ($list as $one) {
+            $pair = self::normalizePair($resolved, $one);
+            if ($pair['error'] !== '') {
+                return ['type' => $resolved, 'name' => implode('、', $list), 'error' => $pair['error']];
+            }
+            if ($pair['type'] !== '') {
+                if ($resolved !== '' && $pair['type'] !== $resolved) {
+                    return [
+                        'type'  => $resolved,
+                        'name'  => implode('、', $list),
+                        'error' => "证书专业「{$one}」属于「{$pair['type']}」，与已选类型「{$resolved}」不一致，请重新选择",
+                    ];
+                }
+                $resolved = $pair['type'];
+            }
+            $clean[] = $pair['name'];
+        }
+        return ['type' => $resolved, 'name' => self::joinNames($clean), 'error' => ''];
+    }
+
+    /** 「专业列包含完整专业名」的 SQL 条件（列内多专业以「、」分隔，前后补分隔符避免子串误判） */
+    private static function whereNameSql($query, string $column, string $name)
+    {
+        return $query->whereRaw("CONCAT('、', {$column}, '、') LIKE ?", ['%、' . trim($name) . '、%']);
+    }
+
     /** 字典项是否被业务引用（用于删除前的友好提示） */
     public static function majorUsage(string $name): int
     {
@@ -154,7 +256,7 @@ class CertDictService
         }
         $count = 0;
         foreach (self::MAJOR_REF_TABLES as $t) {
-            $count += (int)Db::name($t)->where('cert_name', $name)->count();
+            $count += (int)self::whereNameSql(Db::name($t), 'cert_name', $name)->count();
         }
         return $count;
     }
@@ -209,7 +311,8 @@ class CertDictService
         }
         foreach (self::TYPE_REF_COLUMNS as $table => $cols) {
             foreach ($cols as $col) {
-                Db::name($table)->where('cert_name', $name)->update([$col => $newType]);
+                // v2.99.79：多专业证书（「建筑工程、市政公用工程」）也要同步类型
+                self::whereNameSql(Db::name($table), 'cert_name', $name)->update([$col => $newType]);
             }
         }
         self::flushCache();
@@ -227,7 +330,22 @@ class CertDictService
             return;
         }
         foreach (self::MAJOR_REF_TABLES as $table) {
-            Db::name($table)->where('cert_name', $old)->update(['cert_name' => $new]);
+            // v2.99.79：多专业证书逐条按拆分后的完整专业名替换，避免误改子串
+            $rows = self::whereNameSql(Db::name($table), 'cert_name', $old)
+                ->field('id,cert_name')->select()->toArray();
+            foreach ($rows as $row) {
+                $list = self::splitNames((string)($row['cert_name'] ?? ''));
+                $changed = false;
+                foreach ($list as $k => $n) {
+                    if ($n === $old) {
+                        $list[$k] = $new;
+                        $changed = true;
+                    }
+                }
+                if ($changed) {
+                    Db::name($table)->where('id', $row['id'])->update(['cert_name' => implode('、', $list)]);
+                }
+            }
         }
         self::flushCache();
     }

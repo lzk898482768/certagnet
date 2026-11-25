@@ -130,9 +130,15 @@ class PolicyRuleService
 
         $certCategory = (string)($cert['category'] ?? '');
         $certName     = (string)($cert['cert_name'] ?? '');
+        // v2.99.79：多专业证书按拆分后的专业名匹配规则（任一专业命中即适用）
+        $certNames    = CertDictService::splitNames($certName) ?: [$certName];
 
-        $rules = self::rules($projectId, $certCategory, $certName);
+        $rules = self::rules($projectId, $certCategory, '');
         foreach ($rules as $rule) {
+            $ruleName = trim((string)($rule['cert_name'] ?? ''));
+            if ($ruleName !== '' && !in_array($ruleName, $certNames, true)) {
+                continue;
+            }
             $p     = self::parseExpr((string)($rule['rule_expr'] ?? ''));
             $level = (int)($rule['severity'] ?? 1);
 
@@ -167,7 +173,8 @@ class PolicyRuleService
 
                 case 'cert_limit':
                     $allow = array_values(array_filter(array_map('trim', explode(',', (string)($p['allow'] ?? '')))));
-                    if ($allow && !in_array($certName, $allow, true)) {
+                    // v2.99.79：多专业证书只要任一专业在允许清单内即通过
+                    if ($allow && !array_intersect($certNames, $allow)) {
                         $issues[] = [
                             'type'   => 'policy',
                             'level'  => $level,

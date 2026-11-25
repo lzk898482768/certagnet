@@ -118,7 +118,15 @@ class DuplicateResolver
             }
         }
         if ($certName !== '') {
-            $byName = $base()->where('cert_name', $certName)->order('id', 'desc')->find();
+            // v2.99.79：多专业证书按专业集合比较（顺序不同也视为同一本）
+            $byName = null;
+            $nameRows = $base()->where('cert_name', '<>', '')->order('id', 'desc')->select();
+            foreach ($nameRows as $nameRow) {
+                if (CertDictService::sameNames((string)$nameRow['cert_name'], $certName)) {
+                    $byName = $nameRow;
+                    break;
+                }
+            }
             if ($byName) {
                 if (!$row) {
                     $row = $byName;

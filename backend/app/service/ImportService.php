@@ -529,10 +529,13 @@ class ImportService
                     return (string)($m['parent_value'] ?? '') === $certType;
                 }))
                 : $majors;
-            if (!self::inDict($scope, $certName)) {
-                $warn[] = ($certType !== '' && $typeOk)
-                    ? "证书专业「{$certName}」不属于「{$certType}」类型，请在预览页重新选择"
-                    : "证书专业「{$certName}」不在字典中，请在预览页重新选择";
+            // v2.99.79：多专业逐项校验，避免整串「建筑工程、市政公用工程」被当成一个专业
+            foreach (CertDictService::splitNames($certName) as $one) {
+                if (!self::inDict($scope, $one)) {
+                    $warn[] = ($certType !== '' && $typeOk)
+                        ? "证书专业「{$one}」不属于「{$certType}」类型，请在预览页重新选择"
+                        : "证书专业「{$one}」不在字典中，请在预览页重新选择";
+                }
             }
         }
         return $warn;
@@ -544,14 +547,25 @@ class ImportService
      */
     public static function deriveTypeByName(string $certName): string
     {
-        $certName = trim($certName);
-        if ($certName === '') {
+        $names = CertDictService::splitNames($certName);
+        if (!$names) {
             return '';
         }
-        $parents = [];
-        foreach (self::dictAll()['majors'] as $m) {
-            if ((string)($m['dict_value'] ?? '') === $certName || (string)($m['dict_label'] ?? '') === $certName) {
-                $parents[(string)($m['parent_value'] ?? '')] = true;
+        // v2.99.79：多专业时取所有专业归属类型的交集，只有唯一类型才回填
+        $parents = null;
+        foreach ($names as $name) {
+            $one = [];
+            foreach (self::dictAll()['majors'] as $m) {
+                if ((string)($m['dict_value'] ?? '') === $name || (string)($m['dict_label'] ?? '') === $name) {
+                    $one[(string)($m['parent_value'] ?? '')] = true;
+                }
+            }
+            if (!$one) {
+                return '';
+            }
+            $parents = $parents === null ? $one : array_intersect_key($parents, $one);
+            if (!$parents) {
+                return '';
             }
         }
         return count($parents) === 1 ? (string)array_key_first($parents) : '';
@@ -731,8 +745,12 @@ class ImportService
         // 类型为空时先按专业唯一归属反查回填；与录入端口径一致：类型非空时 category 同步为类型，
         // 类型为空（字典未初始化/跨类型同名）才回退到旧列 category，保证两列不打架。
         $certType = trim((string)($row['cert_type'] ?? ''));
+        $certNameVal = CertDictService::joinNames(CertDictService::splitNames((string)($row['cert_name'] ?? '')));
+        if ($certNameVal === '') {
+            $certNameVal = trim((string)($row['cert_name'] ?? ''));
+        }
         if ($certType === '') {
-            $certType = self::deriveTypeByName(trim((string)($row['cert_name'] ?? '')));
+            $certType = self::deriveTypeByName($certNameVal);
         }
         $category = $certType !== '' ? $certType : trim((string)($row['category'] ?? ''));
         // v2.54：证书负责人默认跟随持证人员（证照与人员绑定）；人员未分配时归当前导入用户
@@ -752,7 +770,7 @@ class ImportService
             'staff_id'      => $staffId,
             'cert_type'     => $certType,
             'category'      => $category,
-            'cert_name'     => $row['cert_name'],
+            'cert_name'     => $certNameVal,
             'cert_no'       => $row['cert_no'],
             'issue_date'    => $issueDate ?: null,
             'expire_date'   => $expireDate,
