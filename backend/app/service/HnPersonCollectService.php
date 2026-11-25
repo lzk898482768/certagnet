@@ -27,6 +27,11 @@ class HnPersonCollectService
     public const BASE_URL = 'https://hngcjs.hnjs.henan.gov.cn';
     public const CAPTCHA_TTL = 300;
 
+    /** 平台单页上限：pageSize>10 会直接返回 429 伪限流（实测 20/50 均被拒） */
+    private const PAGE_SIZE = 10;
+
+    private const RATE_LIMIT_MSG = '平台访问受限（429），本次查询已被平台拒绝。通常是短时间连续采集或单页条数超限触发，请等待约 1 分钟后重试';
+
     /** 各查询连接配置 */
     private const ENDPOINTS = [
         'tbreg' => [
@@ -34,7 +39,9 @@ class HnPersonCollectService
             'master'       => '/tBRegPerson/tbregpersonListMaster',
             'url'          => '/tBRegPerson/tbregpersonlist',
             'idcard_param' => 'idcard18',
-            'name_param'   => 'personname',
+            // v2.99.78：平台查询页的姓名/编号输入框就是 nameOrCode，
+            // 旧代码发 personname（平台不识别），仅身份证仍可过滤，但参数名已统一为平台字段。
+            'name_param'   => 'nameOrCode',
         ],
         'slry' => [
             'label'        => '安管人员',
@@ -74,13 +81,11 @@ class HnPersonCollectService
         }
         // 注册类：建造师 / 注册* 
         if (mb_strpos($type, '建造师') !== false || mb_strpos($type, '注册') !== false) {
-            $extra = [];
-            if (mb_strpos($type, '一级建造师') !== false) {
-                $extra['specialtytypnumstr'] = '81';
-            } elseif (mb_strpos($type, '二级建造师') !== false) {
-                $extra['specialtytypnumstr'] = '82';
-            }
-            return ['key' => 'tbreg', 'extra' => $extra];
+            // v2.99.78：不再把「一级/二级」作为平台查询条件。
+            // 平台 specialtytypnumstr 是硬筛选，选错级别会静默返回 0 条（表现为「采集不到」）；
+            // 改为按身份证取回该人员全部注册类证书，再在本地按所选级别优先筛选，
+            // 让业务人员在候选列表中选具体专业（多专业时不再漏采）。
+            return ['key' => 'tbreg', 'extra' => []];
         }
         // 安管人员
         if (mb_strpos($type, '安管') !== false) {
@@ -125,11 +130,27 @@ class HnPersonCollectService
         string $certName
     ): array {
         $session = self::openSession($key);
-        $image = self::fetchCaptchaImage($session['cookies'], $key);
+        return self::issueCaptcha($key, $session['cookies'], $idcard, $name, $extra, $staffId, $certType, $certName);
+    }
+
+    /**
+     * 用已有会话获取验证码并写入采集缓存（tryDirect 命中 3303 时复用同一会话）。
+     */
+    private static function issueCaptcha(
+        string $key,
+        array $cookies,
+        string $idcard,
+        string $name,
+        array $extra,
+        int $staffId,
+        string $certType,
+        string $certName
+    ): array {
+        $cap = self::fetchCaptchaImage($cookies, $key);
 
         $captchaId = bin2hex(random_bytes(16));
         Cache::set(self::captchaKey($captchaId), [
-            'cookies'    => $session['cookies'],
+            'cookies'    => $cap['cookies'],
             'key'        => $key,
             'idcard'    => $idcard,
             'name'     => $name,
@@ -143,7 +164,7 @@ class HnPersonCollectService
 
         return [
             'captcha_id' => $captchaId,
-            'image'      => 'data:image/jpeg;base64,' . base64_encode($image),
+            'image'      => 'data:image/jpeg;base64,' . base64_encode($cap['image']),
             'expires_in' => self::CAPTCHA_TTL,
         ];
     }
@@ -152,11 +173,13 @@ class HnPersonCollectService
     public static function refreshCaptcha(string $captchaId): array
     {
         $sess = self::loadCaptcha($captchaId);
-        $image = self::fetchCaptchaImage($sess['cookies'], (string)$sess['key']);
+        $cap = self::fetchCaptchaImage($sess['cookies'], (string)$sess['key']);
+        // 验证码接口会轮换 YZM_RL_BID，必须同步更新会话 Cookie
+        $sess['cookies'] = $cap['cookies'];
         Cache::set(self::captchaKey($captchaId), $sess, self::CAPTCHA_TTL);
         return [
             'captcha_id' => $captchaId,
-            'image'      => 'data:image/jpeg;base64,' . base64_encode($image),
+            'image'      => 'data:image/jpeg;base64,' . base64_encode($cap['image']),
             'expires_in' => self::CAPTCHA_TTL,
         ];
     }
@@ -201,13 +224,13 @@ class HnPersonCollectService
 
         if ($res['captcha_required']) {
             // 验证码虽通过但查询仍要求验证码（会话失效）：换一张验证码让用户重输
-            $image = self::fetchCaptchaImage($tokenRes['cookies'], $key);
-            $sess['cookies'] = $tokenRes['cookies'];
+            $cap = self::fetchCaptchaImage($tokenRes['cookies'], $key);
+            $sess['cookies'] = $cap['cookies'];
             Cache::set(self::captchaKey($captchaId), $sess, self::CAPTCHA_TTL);
             return [
                 'need_captcha' => true,
                 'captcha_id'   => $captchaId,
-                'image'        => 'data:image/jpeg;base64,' . base64_encode($image),
+                'image'        => 'data:image/jpeg;base64,' . base64_encode($cap['image']),
                 'message'      => '平台仍要求验证码（会话已失效），请重新输入',
                 'candidates'   => [],
             ];
@@ -241,7 +264,18 @@ class HnPersonCollectService
         ], $session['cookies']);
 
         if ($res['captcha_required']) {
-            $cap = self::startCaptcha($key, $idcard, $name, $extra, $staffId, $certType, $certName);
+            // v2.99.78：复用刚才触发 3303 的会话 Cookie 去取验证码，
+            // 避免再打开一次查询页（每次采集少 1~2 个请求，降低被平台限流的概率）。
+            $cap = self::issueCaptcha(
+                $key,
+                !empty($res['cookies']) ? $res['cookies'] : $session['cookies'],
+                $idcard,
+                $name,
+                $extra,
+                $staffId,
+                $certType,
+                $certName
+            );
             return [
                 'need_captcha' => true,
                 'captcha_id'   => $cap['captcha_id'],
@@ -299,7 +333,15 @@ class HnPersonCollectService
         return ['cookies' => $res['cookies']];
     }
 
-    private static function fetchCaptchaImage(array $cookies, string $key): string
+    /**
+     * 获取验证码图片，并回传更新后的 Cookie。
+     *
+     * 平台在 /captcha/captchaImage1 响应里下发 YZM_RL_BID，/setToken 校验验证码时
+     * 依赖该 Cookie；旧实现丢弃了 Set-Cookie，导致带验证码的请求可能一直校验失败。
+     *
+     * @return array{image:string,cookies:array}
+     */
+    private static function fetchCaptchaImage(array $cookies, string $key): array
     {
         $cfg = self::endpoint($key);
         $res = self::httpRequest(
@@ -311,10 +353,13 @@ class HnPersonCollectService
                 'timeout' => 15,
             ]
         );
+        if ((int)$res['status'] === 429) {
+            throw new \RuntimeException(self::RATE_LIMIT_MSG);
+        }
         if ((int)$res['status'] >= 400 || strlen($res['body']) < 200) {
             throw new \RuntimeException('平台验证码加载失败，请稍后重试');
         }
-        return $res['body'];
+        return ['image' => $res['body'], 'cookies' => $res['cookies']];
     }
 
     /**
@@ -328,59 +373,117 @@ class HnPersonCollectService
     private static function search(string $key, array $params, array $cookies): array
     {
         $cfg = self::endpoint($key);
-        $body = [
-            $cfg['idcard_param'] => $params['idcard'],
-            $cfg['name_param']   => $params['name'],
-            'pageNum'  => 1,
-            'pageSize' => 50,
-        ];
-        foreach (($params['extra'] ?? []) as $k => $v) {
-            if ($v !== '' && $v !== null) {
-                $body[$k] = $v;
+        $rows = [];
+        $total = null;
+        $currentCookies = $cookies;
+
+        // v2.99.78：平台对 pageSize>10 的请求不再分页，而是直接返回
+        // {"code":500,"msg":"操作异常:429 TOO_MANY_REQUESTS..."}（伪装成限流）。
+        // 必须固定 pageSize=10，否则会被误判为「未查询到证书」。
+        for ($page = 1; $page <= 3; $page++) {
+            $body = [
+                $cfg['idcard_param'] => $params['idcard'],
+                $cfg['name_param']   => $params['name'],
+                'pageNum'  => $page,
+                'pageSize' => self::PAGE_SIZE,
+            ];
+            foreach (($params['extra'] ?? []) as $k => $v) {
+                if ($v !== '' && $v !== null) {
+                    $body[$k] = $v;
+                }
             }
-        }
 
-        $res = self::httpRequest(self::BASE_URL . $cfg['url'], [
-            'method'  => 'POST',
-            'body'    => $body,
-            'cookies' => $cookies,
-            'accept'  => 'json',
-            'referer' => self::BASE_URL . $cfg['master'],
-            'timeout' => 20,
-        ]);
+            $res = self::httpRequest(self::BASE_URL . $cfg['url'], [
+                'method'  => 'POST',
+                'body'    => $body,
+                'cookies' => $currentCookies,
+                'accept'  => 'json',
+                'referer' => self::BASE_URL . $cfg['master'],
+                'timeout' => 20,
+            ]);
+            $currentCookies = $res['cookies'];
 
-        if (self::isCaptchaRequired($res)) {
-            return ['captcha_required' => true, 'candidates' => [], 'message' => '需要验证码', 'cookies' => $res['cookies']];
-        }
-        if ((int)$res['status'] >= 400) {
-            throw new \RuntimeException('平台查询返回异常（HTTP ' . (int)$res['status'] . '），请稍后重试');
-        }
+            if (self::isCaptchaRequired($res)) {
+                return ['captcha_required' => true, 'candidates' => [], 'message' => '需要验证码', 'cookies' => $currentCookies];
+            }
+            if ((int)$res['status'] === 429) {
+                throw new \RuntimeException(self::RATE_LIMIT_MSG);
+            }
+            if ((int)$res['status'] >= 400) {
+                throw new \RuntimeException('平台查询返回异常（HTTP ' . (int)$res['status'] . '），请稍后重试');
+            }
 
-        $json = json_decode($res['body'], true);
-        if (!is_array($json)) {
-            throw new \RuntimeException('平台查询返回异常，请稍后重试或打开平台页面核对');
-        }
-        $rows = $json['list'] ?? $json['rows'] ?? [];
-        if (!is_array($rows)) {
-            $rows = [];
+            $json = json_decode($res['body'], true);
+            if (!is_array($json)) {
+                throw new \RuntimeException('平台查询返回异常，请稍后重试或打开平台页面核对');
+            }
+            if ((int)($json['code'] ?? 0) !== 0) {
+                $msg = trim((string)($json['msg'] ?? $json['message'] ?? ''));
+                if (self::isRateLimitMessage($msg)) {
+                    throw new \RuntimeException(self::RATE_LIMIT_MSG);
+                }
+                throw new \RuntimeException('平台查询失败：' . ($msg !== '' ? $msg : '未知错误'));
+            }
+
+            $pageRows = $json['list'] ?? $json['rows'] ?? [];
+            if (!is_array($pageRows)) {
+                $pageRows = [];
+            }
+            foreach ($pageRows as $row) {
+                if (is_array($row)) {
+                    $rows[] = $row;
+                }
+            }
+            if (isset($json['total']) && is_numeric($json['total'])) {
+                $total = (int)$json['total'];
+            }
+            // 单页已取完（或平台不返回 total）时结束
+            if (!$pageRows || ($total !== null && count($rows) >= $total) || !$total) {
+                break;
+            }
+            usleep(300000);
         }
 
         $candidates = [];
         foreach ($rows as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
             $candidate = self::mapRow($key, $row, $params);
             if ($candidate !== null) {
                 $candidates[] = $candidate;
             }
         }
 
+        $message = $candidates ? '' : '平台未查询到该人员的证书';
+
+        // v2.99.78：注册类不再用平台 specialtytypnumstr 硬筛级别（选错会静默 0 条），
+        // 改为取回全部证书后本地按所选级别优先；多专业/多级别时交给前端候选列表选择。
+        if ($candidates && $key === 'tbreg') {
+            $requestedType = (string)($params['cert_type'] ?? '');
+            $level = '';
+            if (mb_strpos($requestedType, '一级建造师') !== false) {
+                $level = '一级建造师';
+            } elseif (mb_strpos($requestedType, '二级建造师') !== false) {
+                $level = '二级建造师';
+            }
+            if ($level !== '') {
+                $matched = [];
+                foreach ($candidates as $c) {
+                    if ((string)($c['cert_type'] ?? '') === $level) {
+                        $matched[] = $c;
+                    }
+                }
+                if ($matched) {
+                    $candidates = $matched;
+                } else {
+                    $message = '平台未查询到该人员的' . $level . '证书，已列出该人员其他注册类证书，请核对后选择';
+                }
+            }
+        }
+
         return [
             'captcha_required' => false,
             'candidates'       => $candidates,
-            'message'          => $candidates ? '' : '平台未查询到该人员的证书',
-            'cookies'          => $res['cookies'],
+            'message'          => $message,
+            'cookies'          => $currentCookies,
         ];
     }
 
@@ -562,6 +665,17 @@ class HnPersonCollectService
         return trim((string)($json['message'] ?? $json['msg'] ?? '')) === '3303';
     }
 
+    /** 平台把「单页条数超限 / 短时连续访问」都伪装成 429 TOO_MANY_REQUESTS */
+    private static function isRateLimitMessage(string $msg): bool
+    {
+        if ($msg === '') {
+            return false;
+        }
+        return stripos($msg, '429') !== false
+            || stripos($msg, 'TOO_MANY_REQUESTS') !== false
+            || str_contains($msg, '异常访问');
+    }
+
     private static function clean(string $v): string
     {
         $v = str_replace(["\xc2\xa0", "\u{3000}"], ' ', $v);
@@ -573,6 +687,14 @@ class HnPersonCollectService
         $v = trim($v);
         if ($v === '' || $v === '—' || $v === '-') {
             return '';
+        }
+        // v2.99.78：同一接口有时返回毫秒时间戳（如 1837353600000），需兼容
+        if (preg_match('/^\d{10,13}$/', $v)) {
+            $ts = (int)$v;
+            if ($ts > 9999999999) {
+                $ts = intdiv($ts, 1000);
+            }
+            return date('Y-m-d', $ts);
         }
         if (preg_match('/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/', $v, $m)) {
             return sprintf('%04d-%02d-%02d', $m[1], $m[2], $m[3]);
