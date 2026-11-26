@@ -51,7 +51,9 @@ class Search extends AdminController
         'cert_name'     => ['col' => 'certificate.cert_name',     'entity' => 'cert'],
         'cert_no'       => ['col' => 'certificate.cert_no',       'entity' => 'cert'],
         'cert_type'     => ['col' => 'certificate.cert_type',     'entity' => 'cert'],
-        'category'      => ['col' => 'certificate.category',      'entity' => 'cert'],
+        // v2.99.92：「证书专业」筛选实际应匹配存专业的 cert_name 列（多专业以「、」连接）；
+        // category 列历史上存的是证书类型名而非专业，故改用专用实体 cert_major 做多专业感知匹配。
+        'category'      => ['col' => 'certificate.cert_name',     'entity' => 'cert_major'],
         'issue_org'     => ['col' => 'certificate.issue_org',     'entity' => 'cert'],
         'cert_status'   => ['col' => 'certificate.cert_status',   'entity' => 'cert'],
         'social_status' => ['col' => 'certificate.social_status', 'entity' => 'cert'],
@@ -329,6 +331,27 @@ class Search extends AdminController
                 // 当前/历史借调企业 -> 反查证书
                 $certIds = $this->certIdsByCompany($one['val'], $one['op']);
                 $qq->whereIn('certificate.id', $certIds ?: [0]);
+            } elseif (($meta['entity'] ?? '') === 'cert_major') {
+                // v2.99.92：「证书专业」筛选匹配 cert_name（多专业以「、」连接，逐专业完整名命中），
+                // 并 OR 兼容历史把类型/专业写进 category 列的存量数据，避免老数据筛选断链。
+                $val = trim((string)$one['val']);
+                $qq->where(function ($w) use ($val, $one) {
+                    $nameExpr = "CONCAT('、', certificate.cert_name, '、')";
+                    $catExpr  = "CONCAT('、', certificate.category, '、')";
+                    if ($one['op'] === 'eq') {
+                        // 等于：任一专业完整名相等（顿号边界），避免子串误判
+                        $w->whereRaw("{$nameExpr} LIKE ?", ['%、' . $val . '、%'])
+                          ->whereOrRaw("{$catExpr} LIKE ?", ['%、' . $val . '、%']);
+                    } elseif ($one['op'] === 'not_like') {
+                        // 不包含：两列都不含该专业
+                        $w->whereRaw("{$nameExpr} NOT LIKE ?", ['%、' . $val . '、%'])
+                          ->whereRaw("{$catExpr} NOT LIKE ?", ['%、' . $val . '、%']);
+                    } else {
+                        // 包含：子串匹配即可（cert_name 或历史 category 任一命中）
+                        $w->where('certificate.cert_name', 'like', "%{$val}%")
+                          ->whereOr('certificate.category', 'like', "%{$val}%");
+                    }
+                });
             } else {
                 $this->applyOp($qq, $meta['col'], $one['op'], $one['val']);
             }
