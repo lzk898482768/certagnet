@@ -1,12 +1,13 @@
 <?php
 namespace app\service;
 
+use think\facade\Cache;
 use think\facade\Log;
 
 /**
  * 住房和城乡建设部「全国建筑市场监管公共服务平台」（四库一平台）— 建造师一键采集
  *
- * v2.99.81：建造师更换为住建部全国接口，替代原河南省平台 tbreg 连接。
+ * v2.99.90：建造师更换为住建部全国接口，替代原河南省平台 tbreg 连接。
  * 与河南省平台相比的优势：
  *  - 免图形验证码、无 429 伪限流，两步 HTTP 即可取数；
  *  - 数据为全国口径，不局限于河南省；
@@ -40,6 +41,16 @@ class MohurdCollectService
         'RY_ZCLB_072' => '二级建造师',
     ];
 
+    // ===== v2.99.91：CC 风控加固（实测前置 openresty 按请求频率+IP信誉拦截，机房IP更易被封）=====
+    /** 相邻两次平台请求的最小间隔（秒）：list/detail 之间、不同人员采集之间均节流，降低触发频率 */
+    private const MIN_REQUEST_GAP = 3;
+    /** 采集成功结果缓存时长（秒）：同一身份证重复采集直接命中，不再打接口 */
+    private const RESULT_TTL = 3600;
+    /** 命中 403/429 后的冷却时长（秒）：冷却期内直接快速失败，避免持续请求加重封禁 */
+    private const BLOCK_COOLDOWN = 300;
+    /** 缓存键前缀 */
+    private const CACHE_PREFIX = 'mohurd_collect:';
+
     /**
      * 采集入口：按身份证取该人员全部建造师注册证书，逐专业拆成候选。
      *
@@ -56,15 +67,33 @@ class MohurdCollectService
             throw new \RuntimeException('缺少身份证号，无法在住建部平台查询');
         }
 
+        // 命中风控冷却期：不再发请求（避免持续访问加重封禁），直接抛风控异常由控制器回退河南
+        $blockUntil = (int)Cache::get(self::CACHE_PREFIX . 'block_until', 0);
+        if ($blockUntil >= time()) {
+            $wait = $blockUntil - time() + 1;
+            throw new MohurdRateLimitException(
+                '住建部平台访问频率受限，仍在冷却中（约还需 ' . ceil($wait / 60) . ' 分钟），已自动切换河南省平台采集'
+            );
+        }
+
+        // 结果缓存：同一身份证 + 所选级别在 TTL 内直接复用，重复采集不打接口
+        $cacheKey = self::CACHE_PREFIX . 'result:' . md5($idCard . '|' . $certType);
+        $cached = Cache::get($cacheKey);
+        if (is_array($cached) && isset($cached['candidates'])) {
+            $cached['cached'] = true;
+            return $cached;
+        }
+
         // 第一步：身份证 → 住建部人员ID（同一身份证理论上唯一，仍兼容返回多条的情况）
         $list = self::queryStaffList($idCard);
         if (!$list) {
-            return [
+            $empty = [
                 'need_captcha' => false,
                 'message'      => '住建部平台未查询到该人员的建造师注册信息',
                 'candidates'   => [],
                 'source'       => self::SOURCE,
             ];
+            return $empty;
         }
 
         // 第二步：逐个 staffId 取详情，汇总 regCertList
@@ -96,12 +125,18 @@ class MohurdCollectService
         // 本地按所选级别优先（一级建造师 / 二级建造师），与旧服务交互保持一致
         [$candidates, $message] = self::filterByRequestedLevel($candidates, $certType);
 
-        return [
+        $result = [
             'need_captcha' => false,
             'message'      => $message,
             'candidates'   => $candidates,
             'source'       => self::SOURCE,
         ];
+
+        // 仅缓存有候选的成功结果（空结果不缓存，便于平台补录后再次采集能立即取到）
+        if ($candidates) {
+            Cache::set($cacheKey, $result, self::RESULT_TTL);
+        }
+        return $result;
     }
 
     /** 该服务是否支持某证书类型：仅建造师（含注册建造师） */
@@ -262,6 +297,9 @@ class MohurdCollectService
 
     private static function httpGet(string $url, string $referer): array
     {
+        // 全局节流：保证相邻两次平台请求间隔不小于 MIN_REQUEST_GAP，从源头压低触发 CC 风控的频率
+        self::throttle();
+
         $caFile = rtrim((string)app()->getRootPath(), '/\\') . DIRECTORY_SEPARATOR . 'extend'
             . DIRECTORY_SEPARATOR . 'cert' . DIRECTORY_SEPARATOR . 'cacert.pem';
 
@@ -294,11 +332,37 @@ class MohurdCollectService
             Log::warning('住建部平台人员采集请求失败：' . $err . ' @ ' . $url);
             throw new \RuntimeException('连接住房和城乡建设部平台失败，请检查服务器网络后重试');
         }
+        // CC 风控：openresty 返回空响应体的 403（响应头含 x-cc-via），429 同属频率限制。
+        // 写入冷却标记并抛专用异常，由控制器自动回退河南省平台采集。
+        if ($code === 403 || $code === 429) {
+            Cache::set(self::CACHE_PREFIX . 'block_until', time() + self::BLOCK_COOLDOWN, self::BLOCK_COOLDOWN);
+            Log::warning('住建部平台触发CC风控（HTTP ' . $code . '），进入冷却并回退河南平台 @ ' . $url);
+            throw new MohurdRateLimitException(
+                '住建部平台访问频率受限（HTTP ' . $code . '），已自动切换河南省平台采集'
+            );
+        }
         if ($code >= 400) {
             Log::warning('住建部平台人员采集HTTP异常：' . $code . ' @ ' . $url);
             throw new \RuntimeException('住建部平台暂时无法访问（HTTP ' . $code . '），请稍后重试');
         }
         return ['status' => $code, 'body' => (string)$body];
+    }
+
+    /**
+     * 全局请求节流：以缓存时间戳记录上次请求时刻，不足最小间隔则 sleep 补足。
+     * 跨请求/跨用户生效（缓存为全局），把对平台的整体访问频率压到安全区间。
+     */
+    private static function throttle(): void
+    {
+        $key = self::CACHE_PREFIX . 'last_request_at';
+        $last = (int)Cache::get($key, 0);
+        $now = microtime(true);
+        $wait = (int)round(self::MIN_REQUEST_GAP - ($now - $last));
+        if ($last > 0 && $wait > 0) {
+            sleep($wait);
+            $now = microtime(true);
+        }
+        Cache::set($key, $now);
     }
 
     private static function clean(string $v): string

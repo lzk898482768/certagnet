@@ -13,6 +13,7 @@ use app\service\CrmService;
 use app\service\HnPersonCollectService;
 use app\service\MemPersonCollectService;
 use app\service\MohurdCollectService;
+use app\service\MohurdRateLimitException;
 use think\facade\Db;
 
 class Certificate extends AdminController
@@ -844,8 +845,39 @@ class Certificate extends AdminController
             return json(r_success($result, '应急厅查询平台要求图形验证码，请人工输入后继续采集'));
         }
 
-        // v2.99.90：建造师（注册建造师）改走住建部四库一平台，免验证码、分专业独立有效期。
-        // 安管 / 技工 / 建设厅特种工等仍走河南省平台（带图形验证码）。
+        // 河南省平台采集（注册类/安管/技工/建设厅特种工，带图形验证码）。
+        // 建造师在住建部被 CC 风控时也回退到此流程，故提取为闭包复用。
+        // 返回 [result数组, 提示语]，由外层统一 json 输出，便于回退时改写提示。
+        $hnCollect = function () use ($idCard, $staff, $staffId, $certType, $certName) {
+            $ep = HnPersonCollectService::resolveEndpoint($certType, $certName);
+            if (isset($ep['error'])) {
+                return ['error' => $ep['error']];
+            }
+            try {
+                $result = HnPersonCollectService::tryDirect(
+                    $ep['key'],
+                    $idCard,
+                    trim((string)($staff['staff_name'] ?? '')),
+                    $ep['extra'] ?? [],
+                    $staffId,
+                    $certType,
+                    $certName
+                );
+            } catch (\Throwable $e) {
+                return ['error' => $e->getMessage()];
+            }
+            if (!empty($result['need_captcha'])) {
+                return ['result' => $result, 'msg' => '平台要求图形验证码，请人工输入后继续采集'];
+            }
+            return [
+                'result' => $result,
+                'msg'    => $result['candidates'] ? '采集成功（来源：河南省建筑市场监管平台）' : '平台未查询到该人员的证书',
+            ];
+        };
+
+        // v2.99.90：建造师（注册建造师）优先走住建部四库一平台，免验证码、分专业独立有效期。
+        // v2.99.91：住建部前置 openresty 有 CC 频率风控（机房 IP 易被封且无验证码可输入），
+        // 命中 403/429 或处于冷却期时自动回退河南省平台（人工验证码），保证采集不中断。
         if (MohurdCollectService::supports($certType)) {
             try {
                 $result = MohurdCollectService::collect(
@@ -854,38 +886,34 @@ class Certificate extends AdminController
                     $certType,
                     $certName
                 );
+            } catch (MohurdRateLimitException $e) {
+                // 风控/冷却：记录并回退河南平台，在提示语前说明数据源切换原因
+                \think\facade\Log::info('建造师住建部采集触发风控，回退河南平台：' . $e->getMessage());
+                $fallback = $hnCollect();
+                if (isset($fallback['error'])) {
+                    return json(r_error($fallback['error'], 400));
+                }
+                // 打标志位，前端据此提示当前已切换到河南省平台（响应拦截器不弹成功 msg）
+                $fallback['result']['mohurd_fallback'] = true;
+                $fallback['result']['fallback_reason'] = $e->getMessage();
+                return json(r_success(
+                    $fallback['result'],
+                    '住建部平台访问受限，已切换河南省平台。' . $fallback['msg']
+                ));
             } catch (\Throwable $e) {
                 return json(r_error($e->getMessage(), 400));
             }
             $msg = $result['candidates']
-                ? '采集成功（来源：住建部四库一平台）'
+                ? '采集成功（来源：住建部四库一平台' . (!empty($result['cached']) ? '，缓存结果' : '') . '）'
                 : ($result['message'] ?: '住建部平台未查询到该人员的建造师注册信息');
             return json(r_success($result, $msg));
         }
 
-        $ep = HnPersonCollectService::resolveEndpoint($certType, $certName);
-        if (isset($ep['error'])) {
-            return json(r_error($ep['error'], 400));
+        $hn = $hnCollect();
+        if (isset($hn['error'])) {
+            return json(r_error($hn['error'], 400));
         }
-
-        try {
-            $result = HnPersonCollectService::tryDirect(
-                $ep['key'],
-                $idCard,
-                trim((string)($staff['staff_name'] ?? '')),
-                $ep['extra'] ?? [],
-                $staffId,
-                $certType,
-                $certName
-            );
-        } catch (\Throwable $e) {
-            return json(r_error($e->getMessage(), 400));
-        }
-
-        if (!empty($result['need_captcha'])) {
-            return json(r_success($result, '平台要求图形验证码，请人工输入后继续采集'));
-        }
-        return json(r_success($result, $result['candidates'] ? '采集成功' : '平台未查询到该人员的证书'));
+        return json(r_success($hn['result'], $hn['msg']));
     }
 
     /**
