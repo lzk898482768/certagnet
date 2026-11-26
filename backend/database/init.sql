@@ -1054,6 +1054,7 @@ CREATE TABLE `gov_progress` (
   `is_returned` tinyint NOT NULL DEFAULT 0 COMMENT '1=退件/补正待处理（v2.99.40）',
   `return_reason` varchar(2000) NOT NULL DEFAULT '' COMMENT '退件意见（政务网原文）',
   `return_time` datetime DEFAULT NULL COMMENT '退件时间',
+  `current_opinion` varchar(2000) NOT NULL DEFAULT '' COMMENT '最近一次办理意见（政务网原文，推送透出）（v2.99.93）',
   `is_archived` tinyint NOT NULL DEFAULT 0 COMMENT '1=已归档（办结自动归档）',
   `archive_time` datetime DEFAULT NULL COMMENT '归档时间',
   `archive_source` varchar(16) NOT NULL DEFAULT '' COMMENT 'auto=办结自动归档 manual=手动归档',

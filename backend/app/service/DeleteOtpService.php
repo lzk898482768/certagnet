@@ -115,7 +115,8 @@ class DeleteOtpService
 
     /** 组合后表述别扭的动作，直接给出完整中文标签（优先于模块+后缀拼接） */
     private const FULL_LABELS = [
-        'upgrade/delete-backup' => '升级备份删除',
+        'upgrade/delete-backup'       => '升级备份删除',
+        'upgrade/batch-delete-backup' => '升级备份批量删除',
     ];
 
     /**

@@ -294,6 +294,8 @@ ok('闸门自身 verify 不拦截（否则无法换票）', $dotp::isProtectedAc
 ok('动作中文标签-普通删除', $dotp::actionLabel('staff/delete') === '人员档案删除');
 ok('动作中文标签-批量删除', $dotp::actionLabel('company/batch-delete') === '企业档案批量删除');
 ok('动作中文标签-完整覆盖', $dotp::actionLabel('upgrade/delete-backup') === '升级备份删除');
+ok('备份批量删除受 OTP 闸门保护', $dotp::isProtectedAction('upgrade/batch-delete-backup') === true);
+ok('备份批量删除中文标签', $dotp::actionLabel('upgrade/batch-delete-backup') === '升级备份批量删除');
 ok('审计用途含 delete', isset(app\service\SensitiveAccessService::ALLOWED_PURPOSE['delete']));
 ok('删除审计字段标识固定', app\service\SensitiveAccessService::DELETE_FIELD === 'delete_otp');
 $badActionThrew = false;
@@ -335,6 +337,34 @@ $nodesD = $nodesA; $nodesD[0]['node_name'] = " 受理\u{3000}";
 ok('环节指纹忽略空白差异', $gv::nodesFingerprint($nodesA) === $gv::nodesFingerprint($nodesD));
 ok('长环节名按落库 64 字截断比对', $gv::nodesFingerprint([['node_name' => str_repeat('长', 80), 'state' => 2]])
     === $gv::nodesFingerprint([['node_name' => str_repeat('长', 64), 'state' => 2]]));
+
+echo "[14] 退件识别与办理意见（v2.99.93）\n";
+// 复现线上场景：受理=办理中(state2)，退件=已完成(state1)带意见，审查=未开始(state3)。
+// 旧逻辑只看 state2 的受理节点，漏掉已完成的退件，误报「受理/办理中」。
+$retBase = ['HANDLESTATE' => '办理中'];
+$retNodes = [
+    ['node_name' => '受理', 'state' => 2, 'step' => 1, 'start_time' => '2026-11-20 11:30:03', 'end_time' => null, 'opinion' => ''],
+    ['node_name' => '退件', 'state' => 1, 'step' => 0, 'start_time' => '2026-11-26 09:10:40', 'end_time' => '2026-11-26 09:10:40', 'opinion' => '郭丹丹 申请表上传错误'],
+    ['node_name' => '审查', 'state' => 3, 'step' => 2, 'start_time' => null, 'end_time' => null, 'opinion' => ''],
+];
+$retInfo = $gv::analyze($retBase, $retNodes);
+ok('已完成(state1)的退件节点也能识别为退件', (int)$retInfo['is_returned'] === 1, 'is_returned=' . $retInfo['is_returned']);
+ok('退件后当前环节指向退件节点而非受理', $retInfo['current_node'] === '退件', 'current_node=' . $retInfo['current_node']);
+ok('退件意见被正确提取', $retInfo['return_reason'] === '郭丹丹 申请表上传错误', 'reason=' . $retInfo['return_reason']);
+ok('最近办理意见透出退件原因', $retInfo['current_opinion'] === '郭丹丹 申请表上传错误', 'opinion=' . $retInfo['current_opinion']);
+ok('退件不算办结', (int)$retInfo['is_finished'] === 0);
+// 退件事件：is_returned 0→1 必须产生关键事件（不依赖环节指纹）
+$retBefore = ['current_node' => '受理', 'is_returned' => 0, 'is_suspended' => 0, 'is_finished' => 0, 'node_done' => 0];
+$retAfter  = ['current_node' => '退件', 'is_returned' => 1, 'is_suspended' => 0, 'is_finished' => 0, 'node_done' => 1, 'handle_state' => '办理中'];
+ok('退件产生 returned 关键事件（即使指纹未变）', $hasEvent($gv::changeEvents($retBefore, $retAfter, false), 'returned'));
+// 正常办理（无退件关键词、有审批意见）也应透出最近一次办理意见
+$normNodes = [
+    ['node_name' => '受理', 'state' => 1, 'step' => 1, 'start_time' => '2026-11-20 11:30:03', 'end_time' => '2026-11-20 12:00:00', 'opinion' => '材料齐全'],
+    ['node_name' => '审查', 'state' => 2, 'step' => 2, 'start_time' => '2026-11-21 09:00:00', 'end_time' => null, 'opinion' => ''],
+];
+$normInfo = $gv::analyze(['HANDLESTATE' => '办理中'], $normNodes);
+ok('非退件场景取最近一次有效办理意见', $normInfo['current_opinion'] === '材料齐全', 'opinion=' . $normInfo['current_opinion']);
+ok('非退件场景不误判退件', (int)$normInfo['is_returned'] === 0);
 
 echo "\n结果：{$pass} 通过，{$fail} 失败\n";
 exit($fail > 0 ? 1 : 0);

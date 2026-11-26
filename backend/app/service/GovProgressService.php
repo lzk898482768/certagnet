@@ -53,6 +53,12 @@ class GovProgressService
         3 => '未开始',
     ];
 
+    /**
+     * v2.99.93：退件 / 补正关键词（政务网原文匹配）。
+     * 统一 analyze / changeEvents / 详情格式化三处口径，避免正则不一致。
+     */
+    private const RETURN_PATTERN = '/退件|退回|补正|不予受理|驳回|退办|材料不齐/u';
+
     /** 同步状态：0 未同步 / 1 成功 / 2 失败 */
     public const SYNC_STATES = [
         0 => '未同步',
@@ -95,6 +101,8 @@ class GovProgressService
         ensure_column('gov_progress', 'is_returned', "tinyint NOT NULL DEFAULT 0 COMMENT '1=退件/补正待处理' AFTER `suspend_notified`");
         ensure_column('gov_progress', 'return_reason', "varchar(2000) NOT NULL DEFAULT '' COMMENT '退件意见（政务网原文）' AFTER `is_returned`");
         ensure_column('gov_progress', 'return_time', "datetime DEFAULT NULL COMMENT '退件时间（政务网原文）' AFTER `return_reason`");
+        // v2.99.93：最近一次办理意见（政务网原文），推送消息透出，无则空串
+        ensure_column('gov_progress', 'current_opinion', "varchar(2000) NOT NULL DEFAULT '' COMMENT '最近一次办理意见（政务网原文，推送透出）' AFTER `return_time`");
         ensure_table('gov_progress_node', self::nodeDdl());
         // v2.70：环节审批人。老库只 git pull，运行时补列。
         ensure_column('gov_progress_node', 'approver_name', "varchar(64) NOT NULL DEFAULT '' COMMENT '审批人' AFTER `handler_name`");
@@ -202,6 +210,10 @@ class GovProgressService
   `suspend_reason` varchar(2000) NOT NULL DEFAULT '' COMMENT '挂起意见（政务网原文）',
   `suspend_time` datetime DEFAULT NULL COMMENT '挂起开始时间（政务网原文）',
   `suspend_notified` tinyint NOT NULL DEFAULT 0 COMMENT '1=本次挂起已发送通知',
+  `is_returned` tinyint NOT NULL DEFAULT 0 COMMENT '1=退件/补正待处理',
+  `return_reason` varchar(2000) NOT NULL DEFAULT '' COMMENT '退件意见（政务网原文）',
+  `return_time` datetime DEFAULT NULL COMMENT '退件时间（政务网原文）',
+  `current_opinion` varchar(2000) NOT NULL DEFAULT '' COMMENT '最近一次办理意见（政务网原文，推送透出）（v2.99.93）',
   `is_archived` tinyint NOT NULL DEFAULT 0 COMMENT '1=已归档（办结自动归档）',
   `archive_time` datetime DEFAULT NULL COMMENT '归档时间',
   `archive_source` varchar(16) NOT NULL DEFAULT '' COMMENT 'auto=办结自动归档 manual=手动归档',
@@ -1154,20 +1166,41 @@ class GovProgressService
             $current = end($nodes) ?: null;
         }
 
-        // v2.99.40：退件/补正判定。只认政务网原文（HANDLESTATE / 当前环节名称 / 环节意见），
+        // v2.99.93：退件/补正判定。只认政务网原文（HANDLESTATE / 任一环节名称 / 环节意见），
         // 不做关键词之外的推断；已办结事项不再判为退件。
+        // 关键修复：退件节点在平台里通常是 state=1（已完成，如「退件」环节办完即结束），
+        // 旧逻辑只检查 $current（取到的是仍在「办理中」的受理节点），会漏掉已完成的退件环节，
+        // 导致明明已退件、消息却仍报「受理/办理中」。这里改为扫描全部节点的名称与意见。
         $returnText = $handle;
-        if ($current) {
-            $returnText .= ' ' . (string)($current['node_name'] ?? '') . ' ' . (string)($current['opinion'] ?? '');
+        $returnNode = null;
+        foreach ($nodes as $n) {
+            $name = (string)($n['node_name'] ?? '');
+            $op   = (string)($n['opinion'] ?? '');
+            $returnText .= ' ' . $name . ' ' . $op;
+            if ($returnNode === null && preg_match(self::RETURN_PATTERN, $name . ' ' . $op) === 1) {
+                $returnNode = $n;
+            }
         }
-        $isReturned = (!$finished && preg_match('/退件|退回|补正|不予受理|驳回|退办|材料不齐/u', $returnText) === 1) ? 1 : 0;
+        $isReturned = (!$finished && preg_match(self::RETURN_PATTERN, $returnText) === 1) ? 1 : 0;
         $returnReason = '';
         $returnTime   = null;
         if ($isReturned) {
-            $opinion = trim((string)($current['opinion'] ?? ''));
+            // 优先用命中退件关键词的环节意见；没有则退回当前环节意见，再退回平台 HANDLESTATE
+            $opinion = trim((string)($returnNode['opinion'] ?? ''));
+            if ($opinion === '' && $current) {
+                $opinion = trim((string)($current['opinion'] ?? ''));
+            }
             $returnReason = $opinion !== '' ? $opinion : $handle;
-            if ($current && !empty($current['start_time'])) {
-                $returnTime = (string)$current['start_time'];
+            $timeSource = $returnNode ?? $current;
+            if ($timeSource && !empty($timeSource['start_time'])) {
+                $returnTime = (string)$timeSource['start_time'];
+            } elseif ($timeSource && !empty($timeSource['end_time'])) {
+                $returnTime = (string)$timeSource['end_time'];
+            }
+            // 退件后流程实际停在退件环节：把当前环节指向退件节点（保留其平台原始 state），
+            // 消息与列表即显示「退件」而不是仍在办理中的「受理」。
+            if ($returnNode !== null) {
+                $current = $returnNode;
             }
         }
 
@@ -1197,6 +1230,23 @@ class GovProgressService
             $acceptTime = self::normalizeDateTime((string)($base['RECEIVETIME'] ?? ''));
         }
 
+        // v2.99.93：最近一次有效办理意见（政务网原文），用于推送消息透出。
+        // 退件/补正优先取退件环节意见；否则取最后一个带意见的环节（通常即当前办理环节）。
+        $currentOpinion = '';
+        if ($isReturned && $returnReason !== '') {
+            $currentOpinion = $returnReason;
+        } elseif ($current && trim((string)($current['opinion'] ?? '')) !== '') {
+            $currentOpinion = trim((string)$current['opinion']);
+        } else {
+            for ($i = count($nodes) - 1; $i >= 0; $i--) {
+                $op = trim((string)($nodes[$i]['opinion'] ?? ''));
+                if ($op !== '') {
+                    $currentOpinion = $op;
+                    break;
+                }
+            }
+        }
+
         return [
             'project_name'     => mb_substr($projectName, 0, 255),
             'service_name'     => mb_substr(self::cleanText((string)($base['SERVICENAME'] ?? '')), 0, 255),
@@ -1215,6 +1265,8 @@ class GovProgressService
             'is_returned'      => $isReturned,
             'return_reason'    => mb_substr($returnReason, 0, 2000),
             'return_time'      => $returnTime,
+            // v2.99.93：最近一次办理意见（推送透出），政务网原文，无则空串
+            'current_opinion'  => mb_substr($currentOpinion, 0, 2000),
             'current_node'     => $current ? mb_substr((string)$current['node_name'], 0, 64) : ($finished ? '已办结' : ''),
             'current_state'    => $current ? (int)$current['state'] : ($finished ? 1 : 0),
             'node_total'       => $total,
@@ -1319,6 +1371,8 @@ class GovProgressService
             // v2.90.2：老库已存在的自定义模板通常不含挂起变量，这里统一追加挂起/恢复提醒，
             // 保证挂起状态一定会通知到接收人（内容仍为政务网原文）。
             $content = self::appendSuspendNotice($content, $data, $changes);
+            // v2.99.93：统一追加最近一次办理意见（退件时即退件原因），老模板无需改造即可透出。
+            $content = self::appendOpinionNotice($content, $data);
             $receivers = self::resolveGovReceivers($companyId, $channel->channel_type, $staff, 'gov_progress');
             if (empty($receivers)) {
                 continue;
@@ -1421,7 +1475,7 @@ class GovProgressService
                 $events[] = ['event' => 'accepted', 'label' => '受理', 'key' => true];
                 $keyMatched = true;
             }
-            if (preg_match('/退件|退回|补正|不予受理|驳回|退办/u', $nodeAfter . ' ' . $handle) === 1) {
+            if (preg_match(self::RETURN_PATTERN, $nodeAfter . ' ' . $handle) === 1) {
                 $events[] = ['event' => 'returned', 'label' => '退件/补正', 'key' => true];
                 $keyMatched = true;
             }
@@ -1557,6 +1611,11 @@ class GovProgressService
             'is_suspended_text' => $suspended ? '已挂起' : '正常',
             'suspend_reason'    => (string)($after['suspend_reason'] ?? ''),
             'suspend_time'      => (string)($after['suspend_time'] ?? ''),
+            // v2.99.93：办理意见 / 退件意见（政务网原文），供消息模板透出
+            'current_opinion'   => (string)($after['current_opinion'] ?? ''),
+            'return_reason'     => (string)($after['return_reason'] ?? ''),
+            'is_returned'       => (int)($after['is_returned'] ?? 0) === 1 ? '1' : '0',
+            'is_returned_text'  => (int)($after['is_returned'] ?? 0) === 1 ? '已退件/补正' : '正常',
             'finish_time'       => (string)($after['finish_time'] ?? ''),
             'promise_time'      => (string)($after['promise_time'] ?? ''),
             'archive_time'      => (string)($after['archive_time'] ?? ''),
@@ -1609,6 +1668,36 @@ class GovProgressService
     }
 
     /**
+     * v2.99.93：向推送内容追加最近一次办理意见（政务网原文）。
+     *
+     * 老库已有的「申报进度」模板多只引用 {{current_node}}，不会自动带意见，
+     * 这里在发送前统一补一行，确保退件原因 / 审批意见能通知到接收人。
+     * 平台未返回意见时不追加任何内容；意见已在正文中（模板自行引用了变量）则不重复。
+     *
+     * @param array<string,string> $data
+     */
+    private static function appendOpinionNotice(string $content, array $data): string
+    {
+        // 退件/补正优先展示退件原因，其次用最近一次办理意见
+        $isReturned = (string)($data['is_returned'] ?? '0') === '1';
+        $opinion = self::trimReasonEnd((string)(
+            $isReturned ? (($data['return_reason'] ?? '') !== '' ? $data['return_reason'] : ($data['current_opinion'] ?? ''))
+                        : ($data['current_opinion'] ?? '')
+        ));
+        if ($opinion === '') {
+            return $content;
+        }
+        // 模板已自行引用并渲染出相同意见，避免重复追加
+        if (mb_strpos($content, $opinion) !== false) {
+            return $content;
+        }
+        $line = $isReturned
+            ? '【退件提醒】办理意见：' . $opinion . '。'
+            : '办理意见：' . $opinion . '。';
+        return rtrim($content) . "\n" . $line;
+    }
+
+    /**
      * gov_progress 默认推送文案（模板缺失时兜底）
      */
     protected static function defaultGovContent(string $type, array $data): string
@@ -1626,16 +1715,26 @@ class GovProgressService
             $reason = self::trimReasonEnd((string)($data['suspend_reason'] ?? ''));
             $susp = '【挂起提醒】平台已挂起该申报' . ($reason !== '' ? '，挂起意见：' . $reason : '') . '。';
         }
+        // v2.99.93：办理意见（退件时即退件原因，政务网原文，未返回则不追加）
+        $isReturned = (string)($data['is_returned'] ?? '0') === '1';
+        $opinionRaw = $isReturned
+            ? (($data['return_reason'] ?? '') !== '' ? $data['return_reason'] : ($data['current_opinion'] ?? ''))
+            : ($data['current_opinion'] ?? '');
+        $opinion = self::trimReasonEnd((string)$opinionRaw);
+        $opLine = $opinion !== ''
+            ? ($isReturned ? '【退件提醒】办理意见：' . $opinion . '。' : '办理意见：' . $opinion . '。')
+            : '';
+        $extra = $susp . $opLine;
         if ($type === 'sms') {
-            return "【申报进度更新】{$data['company_name']}：{$data['project_name']}(申报号{$data['project_no']})当前环节「{$node}」，进度{$data['progress_percent']}%。" . $susp . $tail;
+            return "【申报进度更新】{$data['company_name']}：{$data['project_name']}(申报号{$data['project_no']})当前环节「{$node}」，进度{$data['progress_percent']}%。" . $extra . $tail;
         }
         if ($type === 'email') {
-            return "尊敬的{$data['company_name']}：您关注的申报事项{$data['project_name']}(申报号{$data['project_no']})进度已更新。当前环节：{$node}，总进度{$data['progress_percent']}%；{$data['is_finished_text']}。" . $susp . $tail;
+            return "尊敬的{$data['company_name']}：您关注的申报事项{$data['project_name']}(申报号{$data['project_no']})进度已更新。当前环节：{$node}，总进度{$data['progress_percent']}%；{$data['is_finished_text']}。" . $extra . $tail;
         }
         if ($type === 'mp') {
-            return "您关注的申报{$data['project_name']}({$data['project_no']})进度更新为「{$node}」，总进度{$data['progress_percent']}%。" . $susp . $tail;
+            return "您关注的申报{$data['project_name']}({$data['project_no']})进度更新为「{$node}」，总进度{$data['progress_percent']}%。" . $extra . $tail;
         }
-        return "📢 申报进度更新：{$subject} 当前环节「{$node}」，进度{$data['progress_percent']}%。" . $susp . $tail;
+        return "📢 申报进度更新：{$subject} 当前环节「{$node}」，进度{$data['progress_percent']}%。" . $extra . $tail;
     }
 
     /**
@@ -2031,6 +2130,11 @@ class GovProgressService
             'suspend_notified' => $repairSuspended
                 ? ((int)($row['is_suspended'] ?? 0) === 1 ? (int)($row['suspend_notified'] ?? 0) : 0)
                 : 0,
+            // v2.99.93：修复路径同样回填退件状态 / 退件意见 / 最近办理意见
+            'is_returned'      => $info['is_returned'],
+            'return_reason'    => $info['return_reason'],
+            'return_time'      => $info['return_time'],
+            'current_opinion'  => $info['current_opinion'],
             'node_total'       => $info['node_total'],
             'node_done'        => $info['node_done'],
             'progress_percent' => $info['progress_percent'],
@@ -2539,7 +2643,7 @@ class GovProgressService
         $returned = (int)($row['is_returned'] ?? 0) === 1;
         if (!$returned) {
             $hay = (string)($row['handle_state'] ?? '') . ' ' . (string)($row['current_node'] ?? '');
-            $returned = preg_match('/退件|退回|补正|不予受理|驳回|退办|材料不齐/u', $hay) === 1;
+            $returned = preg_match(self::RETURN_PATTERN, $hay) === 1;
         }
         if ((int)($row['is_finished'] ?? 0) === 1 || $archived) {
             $returned = false;
@@ -2547,6 +2651,8 @@ class GovProgressService
         $row['is_returned']   = $returned ? 1 : 0;
         $row['return_reason'] = (string)($row['return_reason'] ?? '');
         $row['return_time']   = $row['return_time'] ?? null;
+        // v2.99.93：最近一次办理意见（推送/详情透出），老数据未回填时为空串
+        $row['current_opinion'] = (string)($row['current_opinion'] ?? '');
 
         $row['password_mask'] = self::maskPassword(self::decryptPassword((string)($row['password_enc'] ?? '')));
         $row['has_password']  = trim((string)($row['password_enc'] ?? '')) !== '';

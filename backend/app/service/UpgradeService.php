@@ -1685,7 +1685,7 @@ class UpgradeService
     public static function deleteBackup(string $file): array
     {
         $file = basename(trim($file));
-        if ($file === '' || !preg_match('/^(files|db)_[A-Za-z0-9._-]+\.(zip|sql)$/', $file)) {
+        if (!self::isValidBackupName($file)) {
             return ['ok' => false, 'msg' => '备份文件名不合法'];
         }
         self::ensureDirs();
@@ -1697,6 +1697,66 @@ class UpgradeService
             return ['ok' => false, 'msg' => '删除失败，请检查备份目录写入权限'];
         }
         return ['ok' => true, 'msg' => '备份已删除', 'file' => $file];
+    }
+
+    /**
+     * v2.99.93：批量删除备份文件。
+     * 逐个走与单删完全相同的名校验与删除逻辑，部分失败不影响其余文件，
+     * 返回成功/失败明细，便于前端精确提示。
+     *
+     * @param array<int,string> $files
+     * @return array{ok:bool,msg:string,total:int,deleted:int,failed:int,files:array<int,string>,errors:array<int,array{file:string,msg:string}>}
+     */
+    public static function deleteBackups(array $files): array
+    {
+        // 去重、去空、只保留 basename，杜绝路径穿越
+        $names = [];
+        foreach ($files as $f) {
+            $name = basename(trim((string)$f));
+            if ($name !== '' && !in_array($name, $names, true)) {
+                $names[] = $name;
+            }
+        }
+        if (!$names) {
+            return ['ok' => false, 'msg' => '请选择要删除的备份', 'total' => 0, 'deleted' => 0,
+                    'failed' => 0, 'files' => [], 'errors' => []];
+        }
+        $deleted = [];
+        $errors  = [];
+        foreach ($names as $name) {
+            $r = self::deleteBackup($name);
+            if (!empty($r['ok'])) {
+                $deleted[] = $name;
+            } else {
+                $errors[] = ['file' => $name, 'msg' => $r['msg']];
+            }
+        }
+        $failCount = count($errors);
+        $okCount   = count($deleted);
+        $ok = $failCount === 0;
+        if ($ok) {
+            $msg = "已删除 {$okCount} 个备份";
+        } elseif ($okCount > 0) {
+            $msg = "已删除 {$okCount} 个，{$failCount} 个失败";
+        } else {
+            $msg = '备份删除失败';
+        }
+        return [
+            'ok'      => $ok,
+            'msg'     => $msg,
+            'total'   => count($names),
+            'deleted' => $okCount,
+            'failed'  => $failCount,
+            'files'   => $deleted,
+            'errors'  => $errors,
+        ];
+    }
+
+    /** 备份名校验：仅允许 backup 目录下的 files_*.zip / db_*.sql */
+    private static function isValidBackupName(string $file): bool
+    {
+        return $file !== ''
+            && preg_match('/^(files|db)_[A-Za-z0-9._-]+\.(zip|sql)$/', $file) === 1;
     }
 
     // ---------------- 内部工具 ----------------

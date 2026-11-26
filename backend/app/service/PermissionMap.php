@@ -315,6 +315,7 @@ class PermissionMap
         'upgrade@apply'             => 'upgrade:run',
         'upgrade@restore'           => 'upgrade:run',
         'upgrade@deletebackup'      => 'upgrade:run',
+        'upgrade@batchdeletebackup' => 'upgrade:run', // v2.99.93 备份批量删除
 
         // ===== v2.85 考试报名 =====
         // 证书类目：保存/删除按 id 已自动判定 create|edit / delete

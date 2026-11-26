@@ -704,12 +704,13 @@ class CertExpireService
             ],
             // v2.73：申报进度更新推送（场景 gov_progress）
             // v2.81.3：默认模板带出 H5 详情链接（{{detail_url}} 由推送时渲染）
+            // v2.99.93：模板带最近一次办理意见（{{current_opinion}}，政务网原文，为空时渲染为空）
             'gov_progress' => [
-                'sms'        => ['申报进度短信', '【申报进度更新】{{company_name}}：{{project_name}}(申报号{{project_no}})当前环节「{{current_node}}」，进度{{progress_percent}}%。' . "\n\n查看详情：{{detail_url}}"],
-                'email'      => ['申报进度邮件', '尊敬的{{company_name}}：您关注的申报事项{{project_name}}(申报号{{project_no}})进度已更新。当前环节：{{current_node}}，总进度{{progress_percent}}%；{{is_finished_text}}。' . "\n\n查看详情：{{detail_url}}"],
-                'wecom'      => ['申报进度群通知', '📢 申报进度更新：{{company_name}} - {{project_name}}({{project_no}}) 当前环节「{{current_node}}」，进度{{progress_percent}}%。' . "\n\n[查看详情]({{detail_url}})"],
-                'wecom_app'  => ['申报进度应用消息', '📢 申报进度更新：{{company_name}} - {{project_name}}({{project_no}}) 当前环节「{{current_node}}」，进度{{progress_percent}}%。' . "\n\n查看详情：{{detail_url}}"],
-                'mp'         => ['申报进度公众号', '您关注的申报{{project_name}}({{project_no}})进度更新为「{{current_node}}」，总进度{{progress_percent}}%。' . "\n\n查看详情：{{detail_url}}"],
+                'sms'        => ['申报进度短信', '【申报进度更新】{{company_name}}：{{project_name}}(申报号{{project_no}})当前环节「{{current_node}}」，进度{{progress_percent}}%。{{current_opinion}}' . "\n\n查看详情：{{detail_url}}"],
+                'email'      => ['申报进度邮件', '尊敬的{{company_name}}：您关注的申报事项{{project_name}}(申报号{{project_no}})进度已更新。当前环节：{{current_node}}，总进度{{progress_percent}}%；{{is_finished_text}}。办理意见：{{current_opinion}}' . "\n\n查看详情：{{detail_url}}"],
+                'wecom'      => ['申报进度群通知', '📢 申报进度更新：{{company_name}} - {{project_name}}({{project_no}}) 当前环节「{{current_node}}」，进度{{progress_percent}}%。{{current_opinion}}' . "\n\n[查看详情]({{detail_url}})"],
+                'wecom_app'  => ['申报进度应用消息', '📢 申报进度更新：{{company_name}} - {{project_name}}({{project_no}}) 当前环节「{{current_node}}」，进度{{progress_percent}}%。{{current_opinion}}' . "\n\n查看详情：{{detail_url}}"],
+                'mp'         => ['申报进度公众号', '您关注的申报{{project_name}}({{project_no}})进度更新为「{{current_node}}」，总进度{{progress_percent}}%。{{current_opinion}}' . "\n\n查看详情：{{detail_url}}"],
             ],
         ];
         foreach ($defaults as $scene => $channels) {

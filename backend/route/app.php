@@ -705,6 +705,7 @@ Route::group('api', function () {
         Route::post('upgrade/apply', 'app\controller\admin\Upgrade@apply');
         Route::post('upgrade/restore', 'app\controller\admin\Upgrade@restore');
         Route::post('upgrade/delete-backup', 'app\controller\admin\Upgrade@deleteBackup');
+        Route::post('upgrade/batch-delete-backup', 'app\controller\admin\Upgrade@batchDeleteBackup');
     })->middleware(['datascope', 'adminauth', 'permauth', 'deleteotp']);
 
     // -------- 客户企业端（只读） --------

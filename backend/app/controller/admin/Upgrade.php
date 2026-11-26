@@ -255,4 +255,33 @@ class Upgrade extends AdminController
         $this->log('在线升级', '删除备份', $r['file']);
         return json(r_success($r, '备份已删除'));
     }
+
+    /**
+     * v2.99.93：批量删除备份文件。
+     * 入参 files 为备份文件名数组；同样受 deleteotp 中间件保护（动作名含 delete）。
+     */
+    public function batchDeleteBackup()
+    {
+        if ($blocked = $this->disabled()) {
+            return $blocked;
+        }
+        $this->boot();
+        if (!$this->can('upgrade', 'run')) {
+            return json(r_error('无执行升级权限', 403));
+        }
+        $files = $this->request->post('files', []);
+        if (!is_array($files)) {
+            return json(r_error('参数 files 必须为数组', 400));
+        }
+        $r = UpgradeService::deleteBackups(array_map('strval', $files));
+        if (empty($r['total'])) {
+            return json(r_error($r['msg'], 400));
+        }
+        $this->log('在线升级', '批量删除备份', '删除 ' . $r['deleted'] . ' 个，失败 ' . $r['failed'] . ' 个');
+        // 部分失败仍返回 200，由前端依据 failed/errors 提示；全部失败才报错
+        if (!$r['ok'] && $r['deleted'] === 0) {
+            return json(r_error($r['msg'], 400));
+        }
+        return json(r_success($r, $r['msg']));
+    }
 }
